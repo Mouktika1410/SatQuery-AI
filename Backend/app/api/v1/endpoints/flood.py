@@ -1,0 +1,471 @@
+"""
+Flood Analysis API Endpoints for SatQuery Phase 1.
+
+Provides endpoints for:
+- Image upload validation
+- Flood detection
+- Polygon generation
+- Impact analysis
+- Evacuation candidate analysis
+- Full pipeline execution
+"""
+
+import os
+import uuid
+import tempfile
+from typing import Any, Dict, Optional
+
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import JSONResponse
+
+from app.core.config import settings
+from app.schemas.flood import (
+    UploadValidationResponse,
+    ImageValidationResult,
+    FloodDetectionResult,
+    FloodPolygonResult,
+    ImpactMetrics,
+    AffectedVillage,
+    PriorityScore,
+    EvacuationCandidatesResult,
+    EvacuationCandidate,
+    PipelineResult,
+)
+
+# In-memory session cache: session_id -> {mask_array, transform, crs, flood_geojson, pipeline_result, ...}
+# NOTE: This is a simple in-process store suitable for single-server prototyping.
+# Phase 2 will use a proper cache (Redis) or database storage.
+_session_cache: Dict[str, Dict[str, Any]] = {}
+
+router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _save_temp(upload_file: Any, suffix: str, tmpdir: str) -> str:
+    """Save an uploaded file to a temp directory synchronously."""
+    path = os.path.join(tmpdir, f"{uuid.uuid4().hex}{suffix}")
+    content = upload_file.file.read()
+    with open(path, "wb") as f:
+        f.write(content)
+    return path
+
+
+def _cleanup_files(*paths: str) -> None:
+    """Remove temporary files, ignoring errors."""
+    for p in paths:
+        try:
+            if p and os.path.isfile(p):
+                os.remove(p)
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# 1. Validate Image Pair
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/validate",
+    response_model=UploadValidationResponse,
+    summary="Validate pre/post GeoTIFF image pair",
+)
+async def validate_images(
+    background_tasks: BackgroundTasks,
+    pre_flood: UploadFile = File(..., description="Pre-flood GeoTIFF image"),
+    post_flood: UploadFile = File(..., description="Post-flood GeoTIFF image"),
+) -> UploadValidationResponse:
+    """
+    Validate that both uploaded images are valid GeoTIFFs with geospatial metadata.
+    Checks CRS, bounding box overlap, and dimension compatibility.
+    """
+    from app.services.image_validation import validate_image_pair
+
+    tmpdir = tempfile.mkdtemp(prefix="satquery_")
+    pre_path = _save_temp(pre_flood, ".tif", tmpdir)
+    post_path = _save_temp(post_flood, ".tif", tmpdir)
+
+    background_tasks.add_task(_cleanup_files, pre_path, post_path)
+
+    result = validate_image_pair(pre_path, post_path)
+
+    pre_result = ImageValidationResult(
+        filename=pre_flood.filename or "pre_flood.tif", **{
+            k: v for k, v in result["pre_flood"].items() if k != "filename"
+        }
+    )
+    post_result = ImageValidationResult(
+        filename=post_flood.filename or "post_flood.tif", **{
+            k: v for k, v in result["post_flood"].items() if k != "filename"
+        }
+    )
+
+    return UploadValidationResponse(
+        pre_flood=pre_result,
+        post_flood=post_result,
+        compatible=result["compatible"],
+        compatibility_notes=result["compatibility_notes"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# 2. Flood Detection
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/detect",
+    response_model=FloodDetectionResult,
+    summary="Detect flood extent from image pair",
+)
+async def detect_flood(
+    pre_flood: UploadFile = File(...),
+    post_flood: UploadFile = File(...),
+    method: str = Form("auto"),
+    ndwi_green_band: int = Form(2),
+    ndwi_nir_band: int = Form(4),
+    morphology_iterations: int = Form(2),
+) -> FloodDetectionResult:
+    """
+    Run deterministic flood detection on uploaded GeoTIFF pair.
+    Stores the flood mask in the session cache for downstream steps.
+    """
+    from app.services.flood_detection import FloodDetectionService
+
+    session_id = uuid.uuid4().hex
+    tmpdir = tempfile.mkdtemp(prefix="satquery_")
+    pre_path = _save_temp(pre_flood, ".tif", tmpdir)
+    post_path = _save_temp(post_flood, ".tif", tmpdir)
+
+    options = {
+        "method": method,
+        "ndwi_green_band": ndwi_green_band,
+        "ndwi_nir_band": ndwi_nir_band,
+        "morphology_iterations": morphology_iterations,
+    }
+
+    result = FloodDetectionService().detect(pre_path, post_path, options)
+
+    if result.get("success"):
+        import rasterio
+        with rasterio.open(pre_path) as ds:
+            transform = ds.transform
+            crs_wkt = ds.crs.to_wkt() if ds.crs else "EPSG:4326"
+
+        _session_cache[session_id] = {
+            "mask_array": result.pop("mask_array", None),
+            "transform": transform,
+            "crs_wkt": crs_wkt,
+            "detection_result": result,
+        }
+        result["session_id"] = session_id
+
+    _cleanup_files(pre_path, post_path)
+
+    return FloodDetectionResult(**{k: v for k, v in result.items() if k in FloodDetectionResult.model_fields})
+
+
+# ---------------------------------------------------------------------------
+# 3. Polygonize Flood Mask
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/polygonize",
+    response_model=FloodPolygonResult,
+    summary="Convert flood mask to GeoJSON polygons",
+)
+async def polygonize(
+    session_id: str = Form(...),
+    simplify_tolerance: float = Form(0.0001),
+) -> FloodPolygonResult:
+    """
+    Convert a previously computed flood mask to GeoJSON vector polygons.
+    Requires a session_id from a prior /detect call.
+    """
+    from app.services.polygon_generation import PolygonGenerationService
+
+    session = _session_cache.get(session_id)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session '{session_id}' not found. Run /detect first.",
+        )
+
+    mask_array = session.get("mask_array")
+    transform = session.get("transform")
+    crs_wkt = session.get("crs_wkt", "EPSG:4326")
+
+    if mask_array is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Flood mask not found in session. Run /detect first.",
+        )
+
+    result = PolygonGenerationService().generate(mask_array, transform, crs_wkt, simplify_tolerance)
+
+    if result.get("success") and result.get("geojson"):
+        _session_cache[session_id]["flood_geojson"] = result["geojson"]
+        _session_cache[session_id]["polygon_result"] = result
+
+    return FloodPolygonResult(**{k: v for k, v in result.items() if k in FloodPolygonResult.model_fields})
+
+
+# ---------------------------------------------------------------------------
+# 4. Impact Analysis
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/impact",
+    summary="Calculate flood impact metrics from GIS datasets",
+)
+async def analyze_impact(session_id: str = Form(...)):
+    """
+    Compute flood impact metrics by overlaying flood polygons with available GIS datasets.
+    Results depend on which datasets are loaded in the data/ directory.
+    """
+    from app.services.exposure_analysis import ExposureAnalysisService
+    from app.services.impact_scoring import ImpactScoringService
+    from app.services.gis_repository import GISRepository
+
+    session = _session_cache.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+
+    flood_geojson = session.get("flood_geojson")
+    if not flood_geojson:
+        raise HTTPException(
+            status_code=422,
+            detail="Flood polygon GeoJSON not found. Run /polygonize first.",
+        )
+
+    gis_repo = GISRepository(settings.DATA_DIR)
+    exposure_svc = ExposureAnalysisService()
+    exposure = exposure_svc.calculate_exposure(flood_geojson, session_id, gis_repo)
+
+    priority = ImpactScoringService().compute_priority_scores(exposure)
+
+    _session_cache[session_id]["impact"] = exposure
+    _session_cache[session_id]["priority_scores"] = priority
+
+    return {
+        "impact": exposure,
+        "priority_scores": priority,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 5. Evacuation Candidates
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/evacuation",
+    summary="Identify candidate accessible sites for on-ground verification",
+)
+async def find_evacuation_candidates(
+    session_id: str = Form(...),
+    buffer_m: float = Form(100.0),
+):
+    """
+    Identify candidate accessible sites outside the flood boundary.
+    IMPORTANT: Results require on-ground verification. Not guaranteed safe zones.
+    """
+    from app.services.evacuation import EvacuationService
+    from app.services.gis_repository import GISRepository
+
+    session = _session_cache.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+
+    flood_geojson = session.get("flood_geojson")
+    if not flood_geojson:
+        raise HTTPException(
+            status_code=422,
+            detail="Flood polygon GeoJSON not found. Run /polygonize first.",
+        )
+
+    gis_repo = GISRepository(settings.DATA_DIR)
+    evac_result = EvacuationService().find_candidates(flood_geojson, gis_repo, buffer_m)
+    _session_cache[session_id]["evacuation"] = evac_result
+
+    return evac_result
+
+
+# ---------------------------------------------------------------------------
+# 6. Full Pipeline
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/pipeline",
+    response_model=PipelineResult,
+    summary="Run complete flood analysis pipeline end-to-end",
+)
+async def run_full_pipeline(
+    pre_flood: UploadFile = File(...),
+    post_flood: UploadFile = File(...),
+    method: str = Form("auto"),
+    simplify_tolerance: float = Form(0.0001),
+    buffer_m: float = Form(100.0),
+) -> PipelineResult:
+    """
+    Execute the complete flood analysis pipeline in one request:
+    Validate → Detect → Polygonize → Impact Analysis → Evacuation Candidates.
+
+    Returns a consolidated PipelineResult. Optional steps that fail
+    (due to missing GIS datasets) are reported but do not abort the pipeline.
+    """
+    from app.services.image_validation import validate_image_pair
+    from app.services.flood_detection import FloodDetectionService
+    from app.services.polygon_generation import PolygonGenerationService
+    from app.services.exposure_analysis import ExposureAnalysisService
+    from app.services.impact_scoring import ImpactScoringService
+    from app.services.evacuation import EvacuationService
+    from app.services.gis_repository import GISRepository
+
+    session_id = uuid.uuid4().hex
+    warnings = []
+    tmpdir = tempfile.mkdtemp(prefix="satquery_")
+    pre_path = _save_temp(pre_flood, f"_pre_{session_id}.tif", tmpdir)
+    post_path = _save_temp(post_flood, f"_post_{session_id}.tif", tmpdir)
+
+    pipeline = PipelineResult(session_id=session_id)
+
+    # Step 1: Validate
+    try:
+        val_raw = validate_image_pair(pre_path, post_path)
+        pre_r = ImageValidationResult(
+            filename=pre_flood.filename or "pre_flood.tif",
+            **{k: v for k, v in val_raw["pre_flood"].items() if k != "filename"},
+        )
+        post_r = ImageValidationResult(
+            filename=post_flood.filename or "post_flood.tif",
+            **{k: v for k, v in val_raw["post_flood"].items() if k != "filename"},
+        )
+        pipeline.validation = UploadValidationResponse(
+            pre_flood=pre_r,
+            post_flood=post_r,
+            compatible=val_raw["compatible"],
+            compatibility_notes=val_raw["compatibility_notes"],
+        )
+        if not val_raw["compatible"]:
+            warnings.append("Image pair compatibility issues detected; proceeding anyway.")
+    except Exception as exc:
+        warnings.append(f"Validation step failed: {exc}")
+
+    # Step 2: Detect
+    detection_result_raw = None
+    mask_array = None
+    transform_obj = None
+    crs_wkt = "EPSG:4326"
+    try:
+        options = {
+            "method": method,
+            "morphology_iterations": 2,
+        }
+        det_svc = FloodDetectionService()
+        detection_result_raw = det_svc.detect(pre_path, post_path, options)
+        mask_array = detection_result_raw.pop("mask_array", None)
+
+        import rasterio
+        with rasterio.open(pre_path) as ds:
+            transform_obj = ds.transform
+            crs_wkt = ds.crs.to_wkt() if ds.crs else "EPSG:4326"
+
+        pipeline.detection = FloodDetectionResult(
+            **{k: v for k, v in detection_result_raw.items() if k in FloodDetectionResult.model_fields}
+        )
+    except Exception as exc:
+        warnings.append(f"Detection step failed: {exc}")
+        pipeline.error = str(exc)
+
+    # Step 3: Polygonize
+    flood_geojson = None
+    if mask_array is not None:
+        try:
+            poly_svc = PolygonGenerationService()
+            poly_result = poly_svc.generate(mask_array, transform_obj, crs_wkt, simplify_tolerance)
+            pipeline.polygons = FloodPolygonResult(
+                **{k: v for k, v in poly_result.items() if k in FloodPolygonResult.model_fields}
+            )
+            flood_geojson = poly_result.get("geojson")
+        except Exception as exc:
+            warnings.append(f"Polygonization step failed: {exc}")
+
+    # Step 4: Impact Analysis
+    if flood_geojson:
+        try:
+            gis_repo = GISRepository(settings.DATA_DIR)
+            exposure_svc = ExposureAnalysisService()
+            exposure = exposure_svc.calculate_exposure(flood_geojson, session_id, gis_repo)
+
+            affected_villages = [
+                AffectedVillage(**v) for v in exposure.get("affected_villages", [])
+            ]
+            pipeline.impact = ImpactMetrics(
+                affected_villages=affected_villages,
+                affected_population=exposure.get("affected_population"),
+                affected_buildings=exposure.get("affected_buildings"),
+                affected_road_length_km=exposure.get("affected_road_length_km"),
+                data_availability=exposure.get("data_availability", {}),
+            )
+
+            raw_priority = ImpactScoringService().compute_priority_scores(exposure)
+            pipeline.priority_scores = [PriorityScore(**p) for p in raw_priority]
+        except Exception as exc:
+            warnings.append(f"Impact analysis step failed: {exc}")
+
+        # Step 5: Evacuation Candidates
+        try:
+            gis_repo = GISRepository(settings.DATA_DIR)
+            evac_raw = EvacuationService().find_candidates(flood_geojson, gis_repo, buffer_m)
+            candidates = [EvacuationCandidate(**c) for c in evac_raw.get("candidates", [])]
+            pipeline.evacuation = EvacuationCandidatesResult(
+                candidates=candidates,
+                total_found=evac_raw.get("total_found", 0),
+                filtered_reason=evac_raw.get("filtered_reason", ""),
+                disclaimer=evac_raw.get("disclaimer", ""),
+            )
+        except Exception as exc:
+            warnings.append(f"Evacuation analysis step failed: {exc}")
+
+    # Cache pipeline result for AI assistant
+    pipeline.warnings = warnings
+    _session_cache[session_id] = {
+        "mask_array": mask_array,
+        "transform": transform_obj,
+        "crs_wkt": crs_wkt,
+        "flood_geojson": flood_geojson,
+        "pipeline_result": pipeline.model_dump(),
+    }
+
+    _cleanup_files(pre_path, post_path)
+    return pipeline
+
+
+# ---------------------------------------------------------------------------
+# 7. Session Management
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/session/{session_id}",
+    summary="Retrieve cached session results",
+)
+async def get_session_results(session_id: str):
+    """Return cached pipeline results for a given session ID."""
+    session = _session_cache.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+    # Return only serializable data (exclude numpy arrays)
+    return {k: v for k, v in session.items() if k not in ("mask_array", "transform")}
+
+
+@router.delete(
+    "/session/{session_id}",
+    summary="Delete a cached session",
+)
+async def delete_session(session_id: str):
+    """Remove a session from the in-memory cache."""
+    if session_id in _session_cache:
+        del _session_cache[session_id]
+        return {"deleted": True, "session_id": session_id}
+    raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
