@@ -849,6 +849,194 @@ body {
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
+/* Interactive selection in lists & tables */
+.interactive {
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.village-item.interactive:hover,
+.evac-item.interactive:hover,
+.priority-row.interactive:hover {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.village-item.selected,
+.evac-item.selected,
+.priority-row.selected {
+  background: rgba(59, 130, 246, 0.22) !important;
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 1px #3b82f6;
+}
+
+/* ============================================================
+   Map GIS UI Overlays & Popups
+   ============================================================ */
+
+.map-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.leaflet-map-container {
+  width: 100%;
+  height: 100%;
+}
+
+.map-action-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 54px;
+  display: flex;
+  gap: 6px;
+  z-index: 1000;
+}
+
+.map-tool-btn {
+  background: rgba(30, 37, 53, 0.9);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 9px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  backdrop-filter: blur(4px);
+  transition: all 0.15s ease;
+}
+
+.map-tool-btn:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.map-selection-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid #3b82f6;
+  border-radius: 20px;
+  padding: 4px 14px;
+  font-size: 0.75rem;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 1000;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(6px);
+}
+
+.banner-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0 2px;
+}
+
+.banner-close-btn:hover {
+  color: var(--danger);
+}
+
+/* Leaflet Custom DivIcon Pins */
+.custom-evac-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #10b981;
+  color: white;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  font-size: 14px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  transition: transform 0.2s;
+}
+
+.custom-evac-pin:hover {
+  transform: scale(1.2);
+}
+
+.selected-pin {
+  background: #f59e0b !important;
+  border-color: #fef08a !important;
+  transform: scale(1.3);
+  box-shadow: 0 0 10px #f59e0b;
+}
+
+/* Rich GIS Popups */
+.gis-popup {
+  font-family: inherit;
+  min-width: 180px;
+  max-width: 250px;
+  color: #1e293b;
+}
+
+.gis-popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #cbd5e1;
+  padding-bottom: 4px;
+  margin-bottom: 6px;
+  gap: 6px;
+}
+
+.gis-popup-title {
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: #0f172a;
+}
+
+.gis-popup-badge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  text-transform: uppercase;
+}
+
+.badge-flood { background: #dbeafe; color: #1e40af; }
+.badge-danger { background: #fee2e2; color: #991b1b; }
+.badge-road { background: #fef3c7; color: #92400e; }
+.badge-candidate { background: #dcfce7; color: #166534; }
+
+.gis-popup-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.74rem;
+  margin-bottom: 3px;
+  color: #475569;
+}
+
+.gis-popup-val {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.gis-popup-val.highlight {
+  color: #dc2626;
+}
+
+.gis-popup-disclaimer {
+  font-size: 0.65rem;
+  color: #b45309;
+  background: #fef3c7;
+  padding: 4px 6px;
+  border-radius: 4px;
+  margin-top: 6px;
+  line-height: 1.3;
+}
+
 /* ============================================================
    Map Legend
    ============================================================ */
@@ -856,31 +1044,102 @@ body {
 .map-legend {
   position: absolute;
   bottom: 24px;
-  right: 10px;
-  background: rgba(30, 37, 53, 0.92);
+  right: 12px;
+  background: rgba(15, 23, 42, 0.92);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 8px 12px;
+  padding: 10px 14px;
   font-size: 0.72rem;
   z-index: 1000;
   color: var(--text-primary);
-  pointer-events: none;
+  min-width: 170px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.legend-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 700;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 5px;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+
+.legend-indicator {
+  font-size: 0.62rem;
+  color: var(--accent);
+  background: rgba(59, 130, 246, 0.15);
+  padding: 1px 5px;
+  border-radius: 4px;
 }
 
 .legend-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
+  gap: 8px;
+  margin-bottom: 6px;
+  transition: opacity 0.2s;
 }
 
-.legend-item:last-child { margin-bottom: 0; }
+.legend-item.layer-off {
+  opacity: 0.35;
+}
+
+.legend-label-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.layer-name {
+  font-weight: 500;
+  color: var(--text-primary);
+  font-size: 0.73rem;
+}
+
+.layer-subtext {
+  font-size: 0.64rem;
+  color: var(--text-muted);
+}
 
 .legend-swatch {
   width: 14px;
   height: 14px;
-  border-radius: 2px;
+  border-radius: 3px;
   flex-shrink: 0;
+}
+
+.swatch-flood {
+  background: rgba(30, 144, 255, 0.65);
+  border: 1.5px solid #0055ff;
+}
+
+.swatch-village {
+  background: rgba(220, 38, 38, 0.2);
+  border: 1.5px solid #dc2626;
+}
+
+.swatch-road {
+  background: transparent;
+  border-top: 2px dashed #e11d48;
+  height: 0px;
+  width: 14px;
+}
+
+.swatch-evac {
+  background: #10b981;
+  border-radius: 50%;
+  border: 1.5px solid #ffffff;
+}
+
+.legend-footer {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+  margin-top: 6px;
 }
 
 .map-no-data {

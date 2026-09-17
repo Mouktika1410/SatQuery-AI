@@ -41,6 +41,8 @@ export default function App() {
   const affectedVillages = pipelineResult?.impact?.affected_villages || [];
   const affectedVillagesGeoJSON = pipelineResult?.impact?.affected_villages_geojson || null;
   const affectedRoadsGeoJSON = pipelineResult?.impact?.affected_roads_geojson || null;
+  const priorityScores = pipelineResult?.priority_scores || [];
+  const [selectedFeature, setSelectedFeature] = useState(null);
 
   return (
     <div className="app">
@@ -53,7 +55,13 @@ export default function App() {
             onRunAnalysis={handleRunAnalysis}
             isRunning={analysisState === 'running'}
           />
-          {pipelineResult && <MetricsPanel result={pipelineResult} />}
+          {pipelineResult && (
+            <MetricsPanel
+              result={pipelineResult}
+              selectedFeature={selectedFeature}
+              onSelectFeature={setSelectedFeature}
+            />
+          )}
         </div>
 
         {/* Center: Map */}
@@ -65,6 +73,9 @@ export default function App() {
             affectedVillages={affectedVillages}
             affectedVillagesGeoJSON={affectedVillagesGeoJSON}
             affectedRoadsGeoJSON={affectedRoadsGeoJSON}
+            priorityScores={priorityScores}
+            selectedFeature={selectedFeature}
+            onSelectFeature={setSelectedFeature}
           />
         </div>
 

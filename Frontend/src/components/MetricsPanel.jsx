@@ -22,7 +22,7 @@ function MetricCard({ icon, value, label, subtext, highlight = false }) {
   );
 }
 
-export default function MetricsPanel({ result }) {
+export default function MetricsPanel({ result, selectedFeature, onSelectFeature }) {
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -152,12 +152,20 @@ export default function MetricsPanel({ result }) {
 
         {impact?.affected_villages?.length > 0 ? (
           <ul className="village-list">
-            {impact.affected_villages.map((v, i) => (
-              <li key={i} className="village-item">
-                <span className="village-name">{v.name}</span>
-                <span className="village-area">{v.area_flooded_km2?.toFixed(2)} km² flooded</span>
-              </li>
-            ))}
+            {impact.affected_villages.map((v, i) => {
+              const isSelected = selectedFeature?.type === 'village' && selectedFeature?.name === v.name;
+              return (
+                <li
+                  key={i}
+                  className={`village-item interactive ${isSelected ? 'selected' : ''}`}
+                  onClick={() => onSelectFeature && onSelectFeature(isSelected ? null : { type: 'village', name: v.name })}
+                  title="Click to locate on GIS map"
+                >
+                  <span className="village-name">🏘️ {v.name}</span>
+                  <span className="village-area">{v.area_flooded_km2?.toFixed(2)} km² flooded</span>
+                </li>
+              );
+            })}
           </ul>
         ) : (
           <div className="info-notice">
@@ -209,23 +217,31 @@ export default function MetricsPanel({ result }) {
                 </tr>
               </thead>
               <tbody>
-                {priority_scores.map((p) => (
-                  <tr key={p.rank}>
-                    <td className="rank-col">{p.rank}</td>
-                    <td className="name-col">{p.village_name}</td>
-                    <td className="score-col">
-                      <div className="score-bar-bg">
-                        <div
-                          className="score-bar-fill"
-                          style={{
-                            width: `${Math.min(100, Math.max(5, p.priority_score * 100)).toFixed(1)}%`,
-                          }}
-                        />
-                      </div>
-                      <span className="score-val">{p.priority_score.toFixed(3)}</span>
-                    </td>
-                  </tr>
-                ))}
+                {priority_scores.map((p) => {
+                  const isSelected = selectedFeature?.type === 'village' && selectedFeature?.name === p.village_name;
+                  return (
+                    <tr
+                      key={p.rank}
+                      className={`priority-row interactive ${isSelected ? 'selected' : ''}`}
+                      onClick={() => onSelectFeature && onSelectFeature(isSelected ? null : { type: 'village', name: p.village_name })}
+                      title="Click to highlight village on map"
+                    >
+                      <td className="rank-col">{p.rank}</td>
+                      <td className="name-col">{p.village_name}</td>
+                      <td className="score-col">
+                        <div className="score-bar-bg">
+                          <div
+                            className="score-bar-fill"
+                            style={{
+                              width: `${Math.min(100, Math.max(5, p.priority_score * 100)).toFixed(1)}%`,
+                            }}
+                          />
+                        </div>
+                        <span className="score-val">{p.priority_score.toFixed(3)}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
 
@@ -253,22 +269,30 @@ export default function MetricsPanel({ result }) {
             </div>
 
             <ul className="evac-list">
-              {evacuation.candidates.map((c, i) => (
-                <li key={i} className="evac-item">
-                  <div className="evac-header">
-                    <span className="evac-name">🏫 {c.name}</span>
-                    <span className="evac-type">{c.type}</span>
-                  </div>
-                  <div className="evac-metrics">
-                    {c.distance_to_flood_km != null && (
-                      <span>Distance to flood: <b>{c.distance_to_flood_km.toFixed(2)} km</b></span>
-                    )}
-                    {c.elevation_m != null && (
-                      <span> · DEM Elevation: <b>{c.elevation_m.toFixed(1)} m</b></span>
-                    )}
-                  </div>
-                </li>
-              ))}
+              {evacuation.candidates.map((c, i) => {
+                const isSelected = selectedFeature?.type === 'evacuation' && selectedFeature?.name === c.name;
+                return (
+                  <li
+                    key={i}
+                    className={`evac-item interactive ${isSelected ? 'selected' : ''}`}
+                    onClick={() => onSelectFeature && onSelectFeature(isSelected ? null : { type: 'evacuation', name: c.name, lat: c.lat, lon: c.lon })}
+                    title="Click to locate candidate site on map"
+                  >
+                    <div className="evac-header">
+                      <span className="evac-name">🏫 {c.name}</span>
+                      <span className="evac-type">{c.type}</span>
+                    </div>
+                    <div className="evac-metrics">
+                      {c.distance_to_flood_km != null && (
+                        <span>Distance to flood: <b>{c.distance_to_flood_km.toFixed(2)} km</b></span>
+                      )}
+                      {c.elevation_m != null && (
+                        <span> · DEM Elevation: <b>{c.elevation_m.toFixed(1)} m</b></span>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
 
             <div className="notice disclaimer-notice">
