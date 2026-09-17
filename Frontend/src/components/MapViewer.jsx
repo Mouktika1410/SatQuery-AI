@@ -4,6 +4,7 @@ import 'leaflet/dist/leaflet.css';
 
 export default function MapViewer({
   floodGeoJSON,
+  floodMetrics,
   evacuationCandidates,
   affectedVillages,
   affectedVillagesGeoJSON,
@@ -22,12 +23,12 @@ export default function MapViewer({
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
     const map = L.map(mapContainerRef.current, {
-      center: [19.0, 72.9], // Default center around Maharashtra/Gujarat flood zone
+      center: [19.0, 72.9], // Default center around Maharashtra/Gujarat flood plain
       zoom: 11,
       zoomControl: true,
     });
 
-    // Base tile layers
+    // Base tile layers: Esri World Imagery Satellite & OpenStreetMap
     const osm = L.tileLayer(
       'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       {
@@ -44,11 +45,12 @@ export default function MapViewer({
       }
     );
 
-    osm.addTo(map);
+    // Default to Satellite basemap for remote sensing imagery display
+    satellite.addTo(map);
 
     const baseMaps = {
-      'Street Map': osm,
       'Satellite': satellite,
+      'Street Map': osm,
     };
 
     const overlayMaps = {};
@@ -57,10 +59,10 @@ export default function MapViewer({
 
     mapInstanceRef.current = map;
 
-    // Trigger map resize after initial render
+    // Trigger map size recalculation after layout render
     setTimeout(() => {
       map.invalidateSize();
-    }, 200);
+    }, 250);
 
     return () => {
       map.remove();
@@ -73,7 +75,7 @@ export default function MapViewer({
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    const boundsToFit = [];
+    let combinedBounds = null;
 
     // 1. Update flood polygon layer
     if (floodLayerRef.current) {
@@ -83,19 +85,39 @@ export default function MapViewer({
     }
 
     if (floodGeoJSON && floodGeoJSON.features && floodGeoJSON.features.length > 0) {
+      const areaStr = floodMetrics?.areaKm2 != null ? `${Number(floodMetrics.areaKm2).toFixed(2)} km²` : 'N/A';
+      const pctStr = floodMetrics?.floodPercentage != null ? `${Number(floodMetrics.floodPercentage).toFixed(2)}%` : 'N/A';
+      const countStr = floodMetrics?.polygonCount != null ? floodMetrics.polygonCount : floodGeoJSON.features.length;
+
       const floodLayer = L.geoJSON(floodGeoJSON, {
         style: {
           color: '#1d4ed8',
-          weight: 2,
+          weight: 2.5,
           opacity: 0.95,
           fillColor: '#3b82f6',
-          fillOpacity: 0.55,
+          fillOpacity: 0.50,
         },
         onEachFeature: (feature, lyr) => {
+          // Highlight on hover
+          lyr.on({
+            mouseover: (e) => {
+              const layer = e.target;
+              layer.setStyle({ fillOpacity: 0.70, weight: 3 });
+            },
+            mouseout: (e) => {
+              floodLayer.resetStyle(e.target);
+            },
+          });
+
           lyr.bindPopup(
-            '<div style="font-family:sans-serif;font-size:13px">' +
-            '<b style="color:#1d4ed8">🌊 Inundated Flood Extent</b><br/>' +
-            '<span style="color:#64748b">Detected via Sentinel satellite change analysis</span>' +
+            '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;font-size:13px;line-height:1.5;padding:2px;min-width:200px">' +
+            '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;border-bottom:1px solid #e2e8f0;padding-bottom:4px">' +
+            '<span style="font-size:16px">🌊</span><b style="color:#1d4ed8;font-size:14px">Detected Flood Extent</b>' +
+            '</div>' +
+            `<div style="display:flex;justify-space-between;margin-bottom:3px"><span><b>Flooded Area:</b></span><span style="color:#1d4ed8;font-weight:600;margin-left:auto">${areaStr}</span></div>` +
+            `<div style="display:flex;justify-space-between;margin-bottom:3px"><span><b>Image Coverage:</b></span><span style="color:#2563eb;font-weight:600;margin-left:auto">${pctStr}</span></div>` +
+            `<div style="display:flex;justify-space-between;margin-bottom:4px"><span><b>Polygon Count:</b></span><span style="color:#475569;font-weight:600;margin-left:auto">${countStr}</span></div>` +
+            '<div style="color:#64748b;font-size:11px;margin-top:6px;background:#f1f5f9;padding:4px 6px;border-radius:4px">Derived from satellite change detection analysis</div>' +
             '</div>'
           );
         },
@@ -107,7 +129,9 @@ export default function MapViewer({
 
       try {
         const b = floodLayer.getBounds();
-        if (b.isValid()) boundsToFit.push(b);
+        if (b.isValid()) {
+          combinedBounds = combinedBounds ? combinedBounds.extend(b) : b;
+        }
       } catch (_) {}
     }
 
@@ -119,21 +143,48 @@ export default function MapViewer({
     }
 
     if (affectedVillagesGeoJSON && affectedVillagesGeoJSON.features && affectedVillagesGeoJSON.features.length > 0) {
+      // Build lookup for village details from affectedVillages array if available
+      const villageLookup = {};
+      if (affectedVillages && Array.isArray(affectedVillages)) {
+        affectedVillages.forEach((v) => {
+          if (v.name) villageLookup[v.name.toLowerCase()] = v;
+        });
+      }
+
       const villagesLayer = L.geoJSON(affectedVillagesGeoJSON, {
         style: {
-          color: '#f59e0b',
+          color: '#d97706',
           weight: 2.5,
-          opacity: 0.9,
+          opacity: 0.95,
           fillColor: '#fef3c7',
-          fillOpacity: 0.25,
-          dashArray: '5, 5',
+          fillOpacity: 0.20,
+          dashArray: '6, 6',
         },
         onEachFeature: (feature, lyr) => {
           const name = feature.properties?.name || feature.properties?.NAME || 'Affected Village';
+          const match = villageLookup[name.toLowerCase()];
+          const floodedKm2 = match?.area_flooded_km2 != null ? `${match.area_flooded_km2.toFixed(2)} km²` : null;
+          const popEst = match?.population_affected != null ? match.population_affected.toLocaleString() : null;
+
+          lyr.on({
+            mouseover: (e) => {
+              e.target.setStyle({ fillOpacity: 0.40, weight: 3.5 });
+            },
+            mouseout: (e) => {
+              villagesLayer.resetStyle(e.target);
+            },
+          });
+
           lyr.bindPopup(
-            '<div style="font-family:sans-serif;font-size:13px">' +
-            `<b style="color:#d97706">🏘️ ${name}</b><br/>` +
-            '<span style="color:#64748b">Village boundary intersected by flood</span>' +
+            '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;font-size:13px;line-height:1.5;padding:2px;min-width:190px">' +
+            '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;border-bottom:1px solid #fef3c7;padding-bottom:4px">' +
+            '<span style="font-size:16px">🏘️</span><b style="color:#d97706;font-size:14px">' + name + '</b>' +
+            '</div>' +
+            (floodedKm2 ? `<div style="margin-bottom:3px"><b>Inundated Area:</b> <span style="color:#d97706;font-weight:600">${floodedKm2}</span></div>` : '') +
+            (popEst ? `<div style="margin-bottom:3px"><b>Est. Affected Pop:</b> <span style="color:#475569;font-weight:600">${popEst}</span></div>` : '') +
+            '<div style="color:#78350f;font-size:11px;margin-top:6px;background:#fffbeb;padding:4px 6px;border-radius:4px;border:1px solid #fef3c7">' +
+            'Village administrative boundary intersected by detected flood polygon' +
+            '</div>' +
             '</div>'
           );
         },
@@ -145,7 +196,9 @@ export default function MapViewer({
 
       try {
         const b = villagesLayer.getBounds();
-        if (b.isValid()) boundsToFit.push(b);
+        if (b.isValid()) {
+          combinedBounds = combinedBounds ? combinedBounds.extend(b) : b;
+        }
       } catch (_) {}
     }
 
@@ -159,17 +212,24 @@ export default function MapViewer({
     if (affectedRoadsGeoJSON && affectedRoadsGeoJSON.features && affectedRoadsGeoJSON.features.length > 0) {
       const roadsLayer = L.geoJSON(affectedRoadsGeoJSON, {
         style: {
-          color: '#ef4444',
+          color: '#dc2626',
           weight: 4,
-          opacity: 0.9,
+          opacity: 0.90,
           dashArray: '4, 4',
         },
         onEachFeature: (feature, lyr) => {
-          const name = feature.properties?.name || 'Road Segment';
+          const name = feature.properties?.name || 'Inundated Road Segment';
+          const type = feature.properties?.highway || 'road';
+
           lyr.bindPopup(
-            '<div style="font-family:sans-serif;font-size:13px">' +
-            `<b style="color:#dc2626">🛣️ ${name}</b><br/>` +
-            '<span style="color:#dc2626;font-weight:600">Flooded / Impassable</span>' +
+            '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;font-size:13px;line-height:1.5;padding:2px;min-width:180px">' +
+            '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;border-bottom:1px solid #fee2e2;padding-bottom:4px">' +
+            '<span style="font-size:16px">🛣️</span><b style="color:#dc2626;font-size:14px">' + name + '</b>' +
+            '</div>' +
+            `<div style="margin-bottom:3px"><b>Highway Type:</b> ${type}</div>` +
+            '<div style="color:#991b1b;font-weight:600;font-size:12px;margin-top:4px;background:#fef2f2;padding:4px 6px;border-radius:4px;border:1px solid #fee2e2">' +
+            '⚠️ Submerged / Impassable Road Network Segment' +
+            '</div>' +
             '</div>'
           );
         },
@@ -181,11 +241,13 @@ export default function MapViewer({
 
       try {
         const b = roadsLayer.getBounds();
-        if (b.isValid()) boundsToFit.push(b);
+        if (b.isValid()) {
+          combinedBounds = combinedBounds ? combinedBounds.extend(b) : b;
+        }
       } catch (_) {}
     }
 
-    // 4. Update candidate evacuation sites markers
+    // 4. Update candidate accessible sites markers
     if (evacuLayerRef.current) {
       layerControlRef.current?.removeLayer(evacuLayerRef.current);
       map.removeLayer(evacuLayerRef.current);
@@ -199,30 +261,37 @@ export default function MapViewer({
 
         const icon = L.divIcon({
           className: 'custom-evac-pin',
-          html: '<div style="background:#10b981;border:2.5px solid white;border-radius:50%;width:16px;height:16px;box-shadow:0 0 6px rgba(0,0,0,0.6);cursor:pointer"></div>',
-          iconSize: [16, 16],
-          iconAnchor: [8, 8],
+          html: (
+            '<div style="background:#10b981;border:2.5px solid white;border-radius:50%;width:18px;height:18px;box-shadow:0 0 6px rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;color:white;font-size:10px;font-weight:bold">' +
+            '✓' +
+            '</div>'
+          ),
+          iconSize: [18, 18],
+          iconAnchor: [9, 9],
         });
 
         const marker = L.marker([c.lat, c.lon], { icon });
         marker.bindPopup(
-          '<div style="font-family:sans-serif;font-size:13px;max-width:240px">' +
-          `<b style="color:#059669;font-size:14px">🏫 ${c.name}</b><br/>` +
-          `<b>Facility:</b> ${c.type}<br/>` +
+          '<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;font-size:13px;line-height:1.5;padding:2px;max-width:240px">' +
+          '<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;border-bottom:1px solid #d1fae5;padding-bottom:4px">' +
+          '<span style="font-size:16px">🏫</span><b style="color:#059669;font-size:14px">' + c.name + '</b>' +
+          '</div>' +
+          `<div style="margin-bottom:2px"><b>Facility Type:</b> ${c.type}</div>` +
           (c.distance_to_flood_km != null
-            ? `<b>Distance to Flood:</b> ${c.distance_to_flood_km.toFixed(2)} km<br/>`
+            ? `<div style="margin-bottom:2px"><b>Proximity to Flood:</b> <span style="color:#059669;font-weight:600">${c.distance_to_flood_km.toFixed(2)} km</span></div>`
             : '') +
           (c.elevation_m != null
-            ? `<b>DEM Elevation:</b> ${c.elevation_m.toFixed(1)} m<br/>`
+            ? `<div style="margin-bottom:4px"><b>DEM Elevation:</b> ${c.elevation_m.toFixed(1)} m</div>`
             : '') +
-          '<div style="font-size:11px;color:#d97706;margin-top:6px;line-height:1.3;border-top:1px solid #e2e8f0;padding-top:4px">' +
-          '⚠️ <em>Candidate accessible site for on-ground verification. Not a verified safe shelter.</em>' +
+          '<div style="font-size:11px;color:#d97706;margin-top:6px;line-height:1.35;background:#fffbeb;padding:5px 7px;border-radius:4px;border:1px solid #fef3c7">' +
+          '⚠️ <b>Disclaimer:</b> Candidate accessible site for on-ground verification only. Not a verified shelter.' +
           '</div>' +
           '</div>'
         );
         group.addLayer(marker);
 
-        boundsToFit.push(L.latLngBounds([c.lat, c.lon], [c.lat, c.lon]));
+        const pointBounds = L.latLngBounds([L.latLng(c.lat, c.lon), L.latLng(c.lat, c.lon)]);
+        combinedBounds = combinedBounds ? combinedBounds.extend(pointBounds) : pointBounds;
       });
 
       group.addTo(map);
@@ -230,19 +299,13 @@ export default function MapViewer({
       layerControlRef.current?.addOverlay(group, '🏫 Candidate Sites');
     }
 
-    // 5. Fit bounds to combined extent of all active layers
-    if (boundsToFit.length > 0) {
-      let combined = boundsToFit[0];
-      for (let i = 1; i < boundsToFit.length; i++) {
-        combined = combined.extend(boundsToFit[i]);
-      }
-      if (combined.isValid()) {
-        map.fitBounds(combined, { padding: [50, 50], maxZoom: 13 });
-      }
+    // 5. Fit bounds smoothly to combined extent of all active layers
+    if (combinedBounds && combinedBounds.isValid()) {
+      map.fitBounds(combinedBounds, { padding: [40, 40], maxZoom: 13 });
     }
 
     map.invalidateSize();
-  }, [floodGeoJSON, affectedVillagesGeoJSON, affectedRoadsGeoJSON, evacuationCandidates]);
+  }, [floodGeoJSON, floodMetrics, affectedVillagesGeoJSON, affectedRoadsGeoJSON, evacuationCandidates]);
 
   const hasData =
     (floodGeoJSON && floodGeoJSON.features && floodGeoJSON.features.length > 0) ||
@@ -250,7 +313,7 @@ export default function MapViewer({
     (evacuationCandidates && evacuationCandidates.length > 0);
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+    <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: '400px' }}>
       {!hasData && (
         <div className="map-no-data">
           <span className="map-no-data-icon">🗺️</span>
@@ -258,24 +321,27 @@ export default function MapViewer({
         </div>
       )}
 
-      <div ref={mapContainerRef} style={{ width: '100%', height: '100%' }} />
+      <div ref={mapContainerRef} style={{ width: '100%', height: '100%', minHeight: '400px' }} />
 
-      {/* Map Legend */}
+      {/* Structured Map Legend */}
       {hasData && (
         <div className="map-legend">
+          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 6, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            Map Layers
+          </div>
           <div className="legend-item">
-            <div className="legend-swatch" style={{ background: 'rgba(59,130,246,0.6)', border: '1.5px solid #1d4ed8' }} />
+            <div className="legend-swatch" style={{ background: 'rgba(59,130,246,0.5)', border: '1.5px solid #1d4ed8' }} />
             <span>Flood Extent</span>
           </div>
           {affectedVillagesGeoJSON?.features?.length > 0 && (
             <div className="legend-item">
-              <div className="legend-swatch" style={{ background: 'rgba(245,158,11,0.25)', border: '1.5px dashed #f59e0b' }} />
+              <div className="legend-swatch" style={{ background: 'rgba(254,243,199,0.4)', border: '1.5px dashed #d97706' }} />
               <span>Affected Villages</span>
             </div>
           )}
           {affectedRoadsGeoJSON?.features?.length > 0 && (
             <div className="legend-item">
-              <div className="legend-swatch" style={{ background: '#ef4444', height: '3px', marginTop: '5px' }} />
+              <div className="legend-swatch" style={{ background: '#dc2626', height: '3px', marginTop: '5px' }} />
               <span>Inundated Roads</span>
             </div>
           )}
@@ -285,7 +351,7 @@ export default function MapViewer({
               <span>Candidate Site (Unverified)</span>
             </div>
           )}
-          <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 5, borderTop: '1px solid var(--border)', paddingTop: 4 }}>
+          <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 6, borderTop: '1px solid var(--border)', paddingTop: 4 }}>
             Toggle layers via top-right control
           </div>
         </div>

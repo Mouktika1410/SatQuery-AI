@@ -32,6 +32,11 @@ export default function App() {
   }, []);
 
   const floodGeoJSON = pipelineResult?.polygons?.geojson || null;
+  const floodMetrics = {
+    areaKm2: pipelineResult?.polygons?.total_area_km2 ?? pipelineResult?.detection?.flood_area_km2 ?? null,
+    floodPercentage: pipelineResult?.detection?.flood_percentage ?? null,
+    polygonCount: pipelineResult?.polygons?.polygon_count ?? null,
+  };
   const evacuationCandidates = pipelineResult?.evacuation?.candidates || [];
   const affectedVillages = pipelineResult?.impact?.affected_villages || [];
   const affectedVillagesGeoJSON = pipelineResult?.impact?.affected_villages_geojson || null;
@@ -55,6 +60,7 @@ export default function App() {
         <div className="main-panel">
           <MapViewer
             floodGeoJSON={floodGeoJSON}
+            floodMetrics={floodMetrics}
             evacuationCandidates={evacuationCandidates}
             affectedVillages={affectedVillages}
             affectedVillagesGeoJSON={affectedVillagesGeoJSON}

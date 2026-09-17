@@ -9,20 +9,51 @@ const SAMPLE_QUESTIONS = [
   'What is the priority ranking?',
 ];
 
+function getInitialAssistantMessage(pipelineResult) {
+  if (!pipelineResult) {
+    return 'Hello! I can answer questions about the flood analysis results. Run an analysis first, then ask me anything.';
+  }
+
+  const floodedAreaVal = pipelineResult.polygons?.total_area_km2 ?? pipelineResult.detection?.flood_area_km2;
+  const areaText = floodedAreaVal != null ? `approximately ${floodedAreaVal.toFixed(2)} km²` : 'a detected flood extent';
+
+  const villages = pipelineResult.impact?.affected_villages;
+  let villageText = '';
+  if (villages && Array.isArray(villages)) {
+    villageText = ` affecting ${villages.length} mapped village${villages.length === 1 ? '' : 's'}`;
+  }
+
+  return `Analysis complete. I found ${areaText}${villageText}. You can ask me about the flood extent, affected population, buildings, roads, priority analysis, or candidate evacuation sites.`;
+}
+
 export default function AiAssistant({ sessionId, pipelineResult }) {
-  const [messages, setMessages] = useState([
+  const [messages, setMessages] = useState(() => [
     {
       role: 'assistant',
-      text: 'Hello! I can answer questions about the flood analysis results. Run an analysis first, then ask me anything.',
+      text: getInitialAssistantMessage(pipelineResult),
     },
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef(null);
+  const prevPipelineResultRef = useRef(pipelineResult);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    if (pipelineResult && pipelineResult !== prevPipelineResultRef.current) {
+      prevPipelineResultRef.current = pipelineResult;
+      const welcomeText = getInitialAssistantMessage(pipelineResult);
+      setMessages((prev) => {
+        if (prev.length <= 1) {
+          return [{ role: 'assistant', text: welcomeText }];
+        }
+        return prev;
+      });
+    }
+  }, [pipelineResult]);
 
   const sendQuestion = async (question) => {
     if (!question.trim() || isLoading) return;
@@ -33,7 +64,7 @@ export default function AiAssistant({ sessionId, pipelineResult }) {
     setIsLoading(true);
 
     try {
-      const response = await sendChatQuery(question, sessionId);
+      const response = await sendChatQuery(question, sessionId, pipelineResult);
       setMessages((prev) => [
         ...prev,
         {
@@ -129,3 +160,4 @@ export default function AiAssistant({ sessionId, pipelineResult }) {
     </div>
   );
 }
+

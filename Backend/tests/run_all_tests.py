@@ -101,7 +101,7 @@ def run_tests():
         return False
 
     # 5. Test Full End-to-End Pipeline
-    print("\n[5/5] Testing Full End-to-End Pipeline Integration...")
+    print("\n[5/6] Testing Full End-to-End Pipeline Integration...")
     try:
         from tests.test_pipeline import (
             test_full_synthetic_pipeline,
@@ -114,8 +114,30 @@ def run_tests():
         print(f"  ✗ Full pipeline integration failed: {exc}")
         return False
 
+    # 6. Test AI Assistant Chat Orchestration
+    print("\n[6/6] Testing AI Assistant Orchestration & Grounding...")
+    try:
+        from tests.test_chat import (
+            test_flooded_area_query,
+            test_affected_population_query,
+            test_affected_villages_query,
+            test_affected_buildings_query,
+            test_evacuation_query,
+            test_priority_analysis_query,
+        )
+        test_flooded_area_query()
+        test_affected_population_query()
+        test_affected_villages_query()
+        test_affected_buildings_query()
+        test_evacuation_query()
+        test_priority_analysis_query()
+        print("  ✓ AI Assistant orchestration tests: PASS (6 tests)")
+    except Exception as exc:
+        print(f"  ✗ AI Assistant tests failed: {exc}")
+        return False
+
     print("\n" + "=" * 65)
-    print(" ALL TESTS PASSED SUCCESSFULLY! (18 test assertions verified)")
+    print(" ALL TESTS PASSED SUCCESSFULLY! (24 test assertions verified)")
     print("=" * 65)
     return True
 

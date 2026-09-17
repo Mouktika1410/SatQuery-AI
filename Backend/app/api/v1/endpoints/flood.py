@@ -33,8 +33,6 @@ from app.schemas.flood import (
 )
 
 # In-memory session cache: session_id -> {mask_array, transform, crs, flood_geojson, pipeline_result, ...}
-# NOTE: This is a simple in-process store suitable for single-server prototyping.
-# Phase 2 will use a proper cache (Redis) or database storage.
 _session_cache: Dict[str, Dict[str, Any]] = {}
 
 router = APIRouter()
@@ -406,7 +404,10 @@ async def run_full_pipeline(
                 affected_population=exposure.get("affected_population"),
                 affected_buildings=exposure.get("affected_buildings"),
                 affected_road_length_km=exposure.get("affected_road_length_km"),
+                affected_villages_geojson=exposure.get("affected_villages_geojson"),
+                affected_roads_geojson=exposure.get("affected_roads_geojson"),
                 data_availability=exposure.get("data_availability", {}),
+                disclaimer=exposure.get("disclaimer", ""),
             )
 
             raw_priority = ImpactScoringService().compute_priority_scores(exposure)
