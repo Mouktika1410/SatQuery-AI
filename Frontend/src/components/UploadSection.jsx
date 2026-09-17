@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { UploadCloud, CheckCircle2, ChevronDown, ChevronUp, RefreshCw, Play } from 'lucide-react';
 
 const METHODS = [
   { value: 'auto', label: 'Auto (recommended)' },
@@ -47,13 +48,13 @@ function FileDropZone({ label, file, onChange, id }) {
         />
         {file ? (
           <>
-            <span className="upload-icon">✅</span>
+            <CheckCircle2 size={24} color="#10b981" className="upload-icon" />
             <div className="file-upload-name">{file.name}</div>
             <div className="file-upload-size">{formatSize(file.size)}</div>
           </>
         ) : (
           <>
-            <span className="upload-icon">📁</span>
+            <UploadCloud size={24} color="#38bdf8" className="upload-icon" />
             <div className="file-upload-label">Click or drag GeoTIFF here</div>
             <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
               .tif / .tiff · Georeferenced required
@@ -87,8 +88,9 @@ export default function UploadSection({ onRunAnalysis, isRunning }) {
 
   return (
     <div className="card">
-      <div className="card-title">
-        🖼️ Image Upload
+      <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <UploadCloud size={16} color="#38bdf8" />
+        <span>Image Ingestion & Analysis</span>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -109,7 +111,7 @@ export default function UploadSection({ onRunAnalysis, isRunning }) {
       {/* Options toggle */}
       <button className="options-toggle" onClick={() => setShowOptions((v) => !v)}>
         <span>Detection Options</span>
-        <span>{showOptions ? '▲' : '▼'}</span>
+        {showOptions ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
       </button>
 
       {showOptions && (
@@ -155,11 +157,18 @@ export default function UploadSection({ onRunAnalysis, isRunning }) {
           className="btn-primary"
           onClick={handleRun}
           disabled={!canRun}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
         >
           {isRunning ? (
-            <>⏳ Running Analysis…</>
+            <>
+              <RefreshCw size={15} className="spin-icon" />
+              Running Analysis…
+            </>
           ) : (
-            <>🚀 Run Flood Analysis</>
+            <>
+              <Play size={15} />
+              Run Flood Analysis
+            </>
           )}
         </button>
 

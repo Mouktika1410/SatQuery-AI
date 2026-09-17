@@ -105,6 +105,34 @@ def test_priority_analysis_query():
     assert "decision-support" in res["answer"]
 
 
+def test_vlm_visual_comparison_fallback():
+    svc = AgentOrchestrationService(api_key=None)
+    res = svc.generate_visual_comparison("nonexistent_pre.tif", "nonexistent_post.tif")
+    assert res["available"] is False
+    assert "GEMINI_API_KEY" in res["comparison"] or "unavailable" in res["comparison"]
+
+
+def test_vlm_query():
+    svc = AgentOrchestrationService()
+    mock_result = get_mock_pipeline_result()
+    mock_result["vlm_analysis"] = {
+        "available": True,
+        "comparison": "Visible increase in dark surface water patches in central sector.",
+        "disclaimer": "Visual comparison performed by Gemini Multimodal VLM.",
+    }
+    res = svc.answer_query("What visual changes are seen by VLM?", mock_result)
+    assert "Visible increase" in res["answer"]
+
+
+def test_api_key_detection():
+    from app.core.config import settings
+    # Verify that the backend can safely detect key presence without exposing raw key
+    has_key = bool(settings.GEMINI_API_KEY)
+    assert isinstance(has_key, bool)
+    svc = AgentOrchestrationService()
+    assert svc.ai_available == has_key
+
+
 if __name__ == "__main__":
     test_flooded_area_query()
     test_affected_population_query()
@@ -112,4 +140,9 @@ if __name__ == "__main__":
     test_affected_buildings_query()
     test_evacuation_query()
     test_priority_analysis_query()
-    print("All AI Assistant chat tests passed!")
+    test_vlm_visual_comparison_fallback()
+    test_vlm_query()
+    test_api_key_detection()
+    print("All AI Assistant chat & VLM tests passed!")
+
+

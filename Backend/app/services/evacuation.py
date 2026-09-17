@@ -131,7 +131,7 @@ class EvacuationService:
                         continue
 
                 # Coordinates in WGS84
-                wgs84_row = pois_wgs84.iloc[idx] if idx < len(pois_wgs84) else pois_wgs84.iloc[0]
+                wgs84_row = pois_wgs84.loc[idx] if idx in pois_wgs84.index else pois_wgs84.iloc[0]
                 lon = wgs84_row.geometry.centroid.x if wgs84_row.geometry else 0.0
                 lat = wgs84_row.geometry.centroid.y if wgs84_row.geometry else 0.0
                 point_wgs84 = Point(lon, lat)

@@ -24,10 +24,26 @@ from rasterio.crs import CRS
 # ---------------------------------------------------------------------------
 
 def _make_mask_geotiff(path, width=64, height=64):
-    """Create a binary mask with a rectangular flooded region."""
+    """Create a binary mask with a single broad organic flooded region."""
     import rasterio
-    mask = np.zeros((height, width), dtype=np.uint8)
-    mask[20:45, 20:45] = 1  # flooded rectangle
+    np.random.seed(42)
+    grid_y, grid_x = np.ogrid[:height, :width]
+    norm_x = grid_x / float(width - 1)
+    norm_y = grid_y / float(height - 1)
+    r_dist = np.sqrt((norm_x - 0.50)**2 + (norm_y - 0.48)**2)
+
+    r1 = np.random.randn(height, width)
+    r2 = np.random.randn(height, width)
+    try:
+        from scipy import ndimage as ndi
+        g1 = ndi.gaussian_filter(r1, sigma=7.0)
+        g2 = ndi.gaussian_filter(r2, sigma=2.5)
+    except ImportError:
+        g1, g2 = r1, r2
+
+    noise = g1 * 0.65 + g2 * 0.35
+    noise = (noise - noise.min()) / (noise.max() - noise.min() + 1e-10)
+    mask = np.where(r_dist < (0.22 + 0.22 * noise), 1, 0).astype(np.uint8)
 
     transform = from_bounds(72.8, 18.9, 73.0, 19.1, width, height)
     profile = {

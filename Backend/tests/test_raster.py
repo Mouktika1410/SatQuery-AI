@@ -125,7 +125,7 @@ def test_otsu_threshold_bimodal():
 
 def test_differencing_detection_synthetic():
     """
-    Flood detection should find a bright rectangular region in the post-image
+    Flood detection should find an organic flooded region in the post-image
     when the pre-image is dark.
     """
     from app.services.flood_detection import FloodDetectionService
@@ -136,9 +136,28 @@ def test_differencing_detection_synthetic():
         pre_path = os.path.join(tmpdir, "pre.tif")
         create_synthetic_geotiff(pre_path, data=pre_data)
 
-        # Post-image: same, but with a bright rectangle (simulated flood / change)
+        # Post-image: single broad organic flood region
+        np.random.seed(42)
+        grid_y, grid_x = np.ogrid[:64, :64]
+        norm_x = grid_x / 63.0
+        norm_y = grid_y / 63.0
+        r_dist = np.sqrt((norm_x - 0.50)**2 + (norm_y - 0.48)**2)
+
+        r1 = np.random.randn(64, 64)
+        r2 = np.random.randn(64, 64)
+        try:
+            from scipy import ndimage as ndi
+            g1 = ndi.gaussian_filter(r1, sigma=7.0)
+            g2 = ndi.gaussian_filter(r2, sigma=2.5)
+        except ImportError:
+            g1, g2 = r1, r2
+
+        noise = g1 * 0.65 + g2 * 0.35
+        noise = (noise - noise.min()) / (noise.max() - noise.min() + 1e-10)
+        organic_mask = r_dist < (0.22 + 0.22 * noise)
+
         post_data = np.full((1, 64, 64), 10.0, dtype=np.float32)
-        post_data[0, 20:45, 20:45] = 200.0  # bright flood region
+        post_data[0, organic_mask] = 200.0  # organic flood region
         post_path = os.path.join(tmpdir, "post.tif")
         create_synthetic_geotiff(post_path, data=post_data)
 
@@ -192,10 +211,128 @@ def test_validate_image_pair_compatible():
         pre_path = os.path.join(tmpdir, "pre.tif")
         post_path = os.path.join(tmpdir, "post.tif")
         create_synthetic_geotiff(pre_path, width=32, height=32)
-        create_synthetic_geotiff(post_path, width=32, height=32)
-
         result = validate_image_pair(pre_path, post_path)
 
     assert result["pre_flood"]["valid"] is True
     assert result["post_flood"]["valid"] is True
     assert result["compatible"] is True
+
+
+def test_vlm_geotiff_conversion_with_nodata():
+    """Verify GeoTIFF to base64 JPEG conversion handles nodata, NaN, and Inf values cleanly."""
+    from app.services.orchestration import _convert_geotiff_to_jpeg_b64
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "nodata_test.tif")
+        data = np.full((1, 32, 32), 30.0, dtype=np.float32)
+        data[0, 0:5, 0:5] = -9999.0
+        data[0, 10, 10] = np.nan
+        data[0, 15, 15] = np.inf
+        data[0, 20:25, 20:25] = 180.0
+        create_synthetic_geotiff(path, width=32, height=32, data=data)
+
+        b64_str = _convert_geotiff_to_jpeg_b64(path)
+
+    assert b64_str is not None, "Expected base64 JPEG string, got None"
+    assert isinstance(b64_str, str)
+    assert len(b64_str) > 50
+
+
+def test_vlm_geotiff_conversion_with_masked_array():
+    """Verify GeoTIFF to base64 JPEG conversion handles MaskedArray data without PIL TypeError."""
+    from app.services.orchestration import _convert_geotiff_to_jpeg_b64
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "masked_test.tif")
+        data = np.full((1, 32, 32), 45.0, dtype=np.float32)
+        create_synthetic_geotiff(path, width=32, height=32, data=data)
+
+        # Mock rasterio dataset read to return a numpy.ma.MaskedArray
+        import rasterio
+        orig_open = rasterio.open
+
+        class MockDS:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            @property
+            def count(self):
+                return 1
+
+            @property
+            def nodata(self):
+                return -9999.0
+
+            def read(self, band):
+                arr = np.full((32, 32), 50.0, dtype=np.float32)
+                mask = np.zeros((32, 32), dtype=bool)
+                mask[0:5, 0:5] = True
+                return np.ma.masked_array(arr, mask=mask)
+
+        def mock_open(p, *args, **kwargs):
+            if "masked_test.tif" in str(p):
+                return MockDS()
+            return orig_open(p, *args, **kwargs)
+
+        try:
+            rasterio.open = mock_open
+            b64_str = _convert_geotiff_to_jpeg_b64(path)
+        finally:
+            rasterio.open = orig_open
+
+    assert b64_str is not None, "Expected base64 JPEG string for MaskedArray input"
+    assert isinstance(b64_str, str)
+    assert len(b64_str) > 50
+
+
+def test_vlm_geotiff_conversion_with_nomask():
+    """Verify GeoTIFF conversion handles MaskedArray with np.ma.nomask without PIL TypeError."""
+    from app.services.orchestration import _convert_geotiff_to_jpeg_b64
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "nomask_test.tif")
+        data = np.full((1, 32, 32), 45.0, dtype=np.float32)
+        create_synthetic_geotiff(path, width=32, height=32, data=data)
+
+        import rasterio
+        orig_open = rasterio.open
+
+        class MockNomaskDS:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            @property
+            def count(self):
+                return 1
+
+            @property
+            def nodata(self):
+                return None
+
+            def read(self, band):
+                arr = np.full((32, 32), 50.0, dtype=np.float32)
+                return np.ma.masked_array(arr, mask=np.ma.nomask)
+
+        def mock_open(p, *args, **kwargs):
+            if "nomask_test.tif" in str(p):
+                return MockNomaskDS()
+            return orig_open(p, *args, **kwargs)
+
+        try:
+            rasterio.open = mock_open
+            b64_str = _convert_geotiff_to_jpeg_b64(path)
+        finally:
+            rasterio.open = orig_open
+
+    assert b64_str is not None, "Expected base64 JPEG string for nomask MaskedArray"
+    assert isinstance(b64_str, str)
+    assert len(b64_str) > 50
+
+
+

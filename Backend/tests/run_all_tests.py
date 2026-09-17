@@ -66,6 +66,9 @@ def run_tests():
             test_differencing_detection_synthetic,
             test_morphological_cleanup_removes_noise,
             test_validate_image_pair_compatible,
+            test_vlm_geotiff_conversion_with_nodata,
+            test_vlm_geotiff_conversion_with_masked_array,
+            test_vlm_geotiff_conversion_with_nomask,
         )
         test_validate_geotiff_valid()
         test_validate_geotiff_missing_file()
@@ -73,7 +76,10 @@ def run_tests():
         test_differencing_detection_synthetic()
         test_morphological_cleanup_removes_noise()
         test_validate_image_pair_compatible()
-        print("  ✓ Raster & detection tests: PASS (6 tests)")
+        test_vlm_geotiff_conversion_with_nodata()
+        test_vlm_geotiff_conversion_with_masked_array()
+        test_vlm_geotiff_conversion_with_nomask()
+        print("  ✓ Raster, detection & VLM conversion tests: PASS (9 tests)")
     except Exception as exc:
         print(f"  ✗ Raster tests failed: {exc}")
         return False
@@ -124,6 +130,9 @@ def run_tests():
             test_affected_buildings_query,
             test_evacuation_query,
             test_priority_analysis_query,
+            test_vlm_visual_comparison_fallback,
+            test_vlm_query,
+            test_api_key_detection,
         )
         test_flooded_area_query()
         test_affected_population_query()
@@ -131,7 +140,10 @@ def run_tests():
         test_affected_buildings_query()
         test_evacuation_query()
         test_priority_analysis_query()
-        print("  ✓ AI Assistant orchestration tests: PASS (6 tests)")
+        test_vlm_visual_comparison_fallback()
+        test_vlm_query()
+        test_api_key_detection()
+        print("  ✓ AI Assistant & VLM orchestration tests: PASS (9 tests)")
     except Exception as exc:
         print(f"  ✗ AI Assistant tests failed: {exc}")
         return False

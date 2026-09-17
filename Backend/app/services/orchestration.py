@@ -61,8 +61,16 @@ class AgentOrchestrationService:
     """
 
     def __init__(self, api_key: Optional[str] = None) -> None:
-        self.api_key = api_key
-        self.ai_available = bool(api_key and api_key.strip())
+        key = api_key
+        if not key or not key.strip():
+            from app.core.config import settings
+            key = settings.GEMINI_API_KEY
+        if key and key.strip():
+            self.api_key = key.strip()
+            self.ai_available = True
+        else:
+            self.api_key = None
+            self.ai_available = False
 
     def answer_query(
         self,
@@ -356,5 +364,194 @@ class AgentOrchestrationService:
                 ["polygons.polygon_count"],
             )
 
+        # --- VLM Visual Comparison ---
+        if any(kw in question for kw in ["vlm", "visual change", "visual comparison", "before after", "visual evidence", "satellite visual"]):
+            vlm = result.get("vlm_analysis") or {}
+            comp = vlm.get("comparison", "VLM visual comparison is not available for this session.")
+            return (
+                f"VLM Satellite Visual Analysis: {comp}",
+                ["vlm_analysis.comparison"],
+            )
+
         return None, []
+
+    def generate_visual_comparison(
+        self, pre_path: str, post_path: str
+    ) -> Dict[str, Any]:
+        """
+        Generate a qualitative visual comparison of pre and post satellite images using Gemini Multimodal VLM.
+
+        Args:
+            pre_path: File path to pre-flood GeoTIFF
+            post_path: File path to post-flood GeoTIFF
+
+        Returns:
+            Dict matching VLMAnalysisResult schema.
+        """
+        disclaimer = (
+            "Visual comparison performed by Gemini Multimodal VLM. "
+            "Qualitative visual description separate from quantitative GIS measurements."
+        )
+
+        if not self.ai_available or not self.api_key:
+            return {
+                "available": False,
+                "comparison": "VLM visual comparison is unavailable. Set GEMINI_API_KEY environment variable to enable satellite image visual change analysis.",
+                "disclaimer": disclaimer,
+            }
+
+        pre_b64 = _convert_geotiff_to_jpeg_b64(pre_path)
+        post_b64 = _convert_geotiff_to_jpeg_b64(post_path)
+
+        if not pre_b64 or not post_b64:
+            return {
+                "available": False,
+                "comparison": "VLM visual comparison unavailable: Satellite image conversion failed or files were unreadable.",
+                "disclaimer": disclaimer,
+            }
+
+        prompt = (
+            "You are analyzing a pair of satellite images taken BEFORE and AFTER a potential flood event.\n"
+            "Image 1: Pre-event satellite image.\n"
+            "Image 2: Post-event satellite image.\n\n"
+            "Provide a short qualitative visual comparison answering:\n"
+            "1. What visual changes are visible between before and after?\n"
+            "2. Is there visible evidence of increased surface water or flooding?\n"
+            "3. Which areas show notable visual change?\n\n"
+            "CRITICAL INSTRUCTIONS:\n"
+            "- Do NOT calculate or estimate numerical flood area (km²), population, building counts, or priority scores.\n"
+            "- Focus strictly on qualitative visual observations (e.g. darkening of soil, expanding water bodies, submerged vegetation, color changes).\n"
+            "- Keep response concise, structured, and under 200 words."
+        )
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.api_key}"
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt},
+                        {
+                            "inlineData": {
+                                "mimeType": "image/jpeg",
+                                "data": pre_b64,
+                            }
+                        },
+                        {
+                            "inlineData": {
+                                "mimeType": "image/jpeg",
+                                "data": post_b64,
+                            }
+                        },
+                    ]
+                }
+            ],
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 400},
+        }
+
+        try:
+            req = urllib.request.Request(
+                url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                res_data = json.loads(resp.read().decode("utf-8"))
+                candidates = res_data.get("candidates", [])
+                if candidates:
+                    text_parts = candidates[0].get("content", {}).get("parts", [])
+                    if text_parts:
+                        ans_text = text_parts[0].get("text", "").strip()
+                        return {
+                            "available": True,
+                            "comparison": ans_text,
+                            "disclaimer": disclaimer,
+                        }
+        except Exception as e:
+            logger.warning(f"Gemini VLM call encountered error: {e}")
+            return {
+                "available": False,
+                "comparison": f"VLM visual comparison request failed: {e}",
+                "disclaimer": disclaimer,
+            }
+
+        return {
+            "available": False,
+            "comparison": "VLM visual comparison produced no output.",
+            "disclaimer": disclaimer,
+        }
+
+
+def _convert_geotiff_to_jpeg_b64(file_path: str, max_size: int = 512) -> Optional[str]:
+    """Convert GeoTIFF image to base64 JPEG string for Gemini VLM."""
+    import base64
+    import io
+    import os
+
+    if not file_path or not os.path.exists(file_path):
+        return None
+    try:
+        import numpy as np
+        import rasterio
+        from PIL import Image
+
+        with rasterio.open(file_path) as ds:
+            cnt = ds.count
+            if cnt >= 3:
+                b1 = ds.read(1)
+                b2 = ds.read(2)
+                b3 = ds.read(3)
+                img_arr = np.dstack((b1, b2, b3))
+            else:
+                b1 = ds.read(1)
+                img_arr = np.dstack((b1, b1, b1))
+
+            # Convert MaskedArray to standard numpy ndarray and capture mask safely
+            is_masked = isinstance(img_arr, np.ma.MaskedArray)
+            if is_masked:
+                raw_mask = img_arr.mask
+                if raw_mask is not np.ma.nomask and raw_mask is not False and np.any(raw_mask):
+                    ma_mask = np.asarray(raw_mask, dtype=bool)
+                else:
+                    ma_mask = None
+                img_arr = np.asarray(np.ma.getdata(img_arr))
+            else:
+                ma_mask = None
+
+            # Build valid mask excluding nodata, NaN, Inf, and MaskedArray mask
+            valid_mask = np.isfinite(img_arr)
+            if ds.nodata is not None:
+                valid_mask = valid_mask & (img_arr != ds.nodata)
+            if ma_mask is not None:
+                valid_mask = valid_mask & (~ma_mask)
+
+            valid_mask = np.asarray(valid_mask, dtype=bool)
+
+            if np.any(valid_mask):
+                valid_vals = img_arr[valid_mask]
+                min_val = float(np.min(valid_vals))
+                max_val = float(np.max(valid_vals))
+            else:
+                min_val, max_val = 0.0, 1.0
+
+            clean_arr = np.asarray(np.where(valid_mask, img_arr, min_val))
+
+            if max_val > min_val:
+                scaled = (clean_arr - min_val) / (max_val - min_val) * 255.0
+            else:
+                scaled = np.zeros_like(clean_arr)
+
+            img_norm = np.asarray(
+                np.clip(np.nan_to_num(scaled, nan=0.0, posinf=255.0, neginf=0.0), 0, 255),
+                dtype=np.uint8,
+            )
+
+            pil_img = Image.fromarray(img_norm)
+            pil_img.thumbnail((max_size, max_size))
+
+            buffer = io.BytesIO()
+            pil_img.save(buffer, format="JPEG", quality=85)
+            return base64.b64encode(buffer.getvalue()).decode("utf-8")
+    except Exception as e:
+        logger.warning(f"GeoTIFF conversion for VLM failed ({file_path}): {e}")
+        return None
+
 

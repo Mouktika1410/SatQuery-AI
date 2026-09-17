@@ -1,4 +1,5 @@
 import React from 'react';
+import { Satellite, Upload } from 'lucide-react';
 
 const STATUS_LABELS = {
   idle: 'Ready',
@@ -7,26 +8,51 @@ const STATUS_LABELS = {
   error: 'Error',
 };
 
-export default function Header({ status = 'idle' }) {
+const TAB_TITLES = {
+  map: 'Map Explorer',
+  impact: 'Impact & Vulnerability Analysis',
+  evacuation: 'Evacuation Site Screening',
+  upload: 'Data Ingestion & Methodology',
+  ai: 'AI Contextual Assistant',
+};
+
+export default function Header({ status = 'idle', activeTab = 'map', onNavigate, onGoHome, hasData }) {
   return (
     <header className="header">
-      <div className="header-logo">
-        <span className="header-logo-icon">🛰️</span>
-        <div>
-          <div className="header-logo-text">SatQuery</div>
-          <div className="header-subtitle">AI-Powered Flood Analysis Assistant</div>
+      <div className="header-left">
+        <button className="header-logo-btn" onClick={onGoHome} title="Go to Landing Page">
+          <Satellite className="header-logo-icon" size={22} color="#38bdf8" />
+          <div>
+            <div className="header-logo-text">SatQuery</div>
+            <div className="header-subtitle">Spatial Flood Intelligence</div>
+          </div>
+        </button>
+
+        <div className="header-divider" />
+
+        <div className="header-breadcrumb">
+          <span className="breadcrumb-category">Workspace</span>
+          <span className="breadcrumb-slash">/</span>
+          <span className="breadcrumb-current">{TAB_TITLES[activeTab] || 'Map Explorer'}</span>
         </div>
       </div>
 
-      <div className="header-divider" />
+      <div className="header-right">
+        {onNavigate && (
+          <button
+            className="header-cta-upload"
+            onClick={() => onNavigate('upload')}
+          >
+            <Upload size={14} style={{ marginRight: 6 }} />
+            Upload Data
+          </button>
+        )}
 
-      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-        Phase 1 Prototype · Deterministic GIS
-      </span>
-
-      <span className={`header-status-badge ${status}`}>
-        {STATUS_LABELS[status] || status}
-      </span>
+        <span className={`header-status-badge ${status}`}>
+          <span className="status-badge-dot" />
+          {STATUS_LABELS[status] || status}
+        </span>
+      </div>
     </header>
   );
 }

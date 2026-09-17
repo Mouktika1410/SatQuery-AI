@@ -28,7 +28,7 @@ def generate_scenario(base_data_dir: str = "data") -> None:
 
     print(f"Generating synthetic scenario datasets into '{base_data_dir}'...")
 
-    # 1. Generate Village Boundaries GeoJSON
+    # 1. Generate Village Boundaries GeoJSON with natural curvilinear polygons
     villages_geojson = {
         "type": "FeatureCollection",
         "features": [
@@ -38,7 +38,8 @@ def generate_scenario(base_data_dir: str = "data") -> None:
                 "geometry": {
                     "type": "Polygon",
                     "coordinates": [[
-                        [72.82, 19.02], [72.90, 19.02], [72.90, 19.08], [72.82, 19.08], [72.82, 19.02]
+                        [72.822, 19.025], [72.845, 19.018], [72.875, 19.032], [72.895, 19.055],
+                        [72.885, 19.078], [72.855, 19.082], [72.830, 19.065], [72.822, 19.025]
                     ]]
                 }
             },
@@ -48,7 +49,8 @@ def generate_scenario(base_data_dir: str = "data") -> None:
                 "geometry": {
                     "type": "Polygon",
                     "coordinates": [[
-                        [72.88, 18.94], [72.96, 18.94], [72.96, 19.02], [72.88, 19.02], [72.88, 18.94]
+                        [72.882, 18.945], [72.915, 18.940], [72.955, 18.955], [72.962, 18.988],
+                        [72.945, 19.015], [72.910, 19.018], [72.885, 18.985], [72.882, 18.945]
                     ]]
                 }
             },
@@ -58,7 +60,8 @@ def generate_scenario(base_data_dir: str = "data") -> None:
                 "geometry": {
                     "type": "Polygon",
                     "coordinates": [[
-                        [72.92, 19.02], [72.98, 19.02], [72.98, 19.08], [72.92, 19.08], [72.92, 19.02]
+                        [72.922, 19.022], [72.948, 19.018], [72.978, 19.035], [72.985, 19.062],
+                        [72.965, 19.082], [72.935, 19.075], [72.920, 19.050], [72.922, 19.022]
                     ]]
                 }
             }
@@ -163,11 +166,64 @@ def generate_scenario(base_data_dir: str = "data") -> None:
         transform = from_bounds(MIN_LON, MIN_LAT, MAX_LON, MAX_LAT, WIDTH, HEIGHT)
         crs = CRS.from_epsg(4326)
 
-        # Elevation DEM: Hill gradient from 5m (west) to 85m (east)
-        x_coords = np.linspace(0, 1, WIDTH)
-        y_coords = np.linspace(0, 1, HEIGHT)
-        xx, yy = np.meshgrid(x_coords, y_coords)
-        dem_data = (5.0 + 80.0 * xx + 15.0 * yy).astype(np.float32)
+        np.random.seed(42)
+
+        grid_y, grid_x = np.ogrid[:HEIGHT, :WIDTH]
+        norm_x = grid_x / float(WIDTH - 1)
+        norm_y = grid_y / float(HEIGHT - 1)
+
+        # 1. Main Estuarine Trough Axis (stretching west-to-east across middle)
+        estuary_axis_y = 0.52 - 0.08 * (norm_x - 0.5) + 0.04 * np.sin(norm_x * 4.0)
+        dist_axis = np.abs(norm_y - estuary_axis_y)
+
+        # Base bay width: narrow on west (0.08), expanding wide on east (0.28)
+        base_bay_width = 0.09 + 0.18 * norm_x
+        main_bay_potential = 1.0 - np.clip(dist_axis / base_bay_width, 0, 1)
+
+        # 2. Finger-like Inlet Arms extending North and South into valleys (matching reference image)
+        f1_n = np.exp(-((norm_x - 0.22)**2 / 0.005 + (norm_y - 0.45)**2 / 0.04))
+        f1_s = np.exp(-((norm_x - 0.26)**2 / 0.004 + (norm_y - 0.62)**2 / 0.03))
+        f2_n = np.exp(-((norm_x - 0.48)**2 / 0.006 + (norm_y - 0.35)**2 / 0.05))
+        f2_s = np.exp(-((norm_x - 0.52)**2 / 0.005 + (norm_y - 0.72)**2 / 0.04))
+        f3_n = np.exp(-((norm_x - 0.72)**2 / 0.008 + (norm_y - 0.28)**2 / 0.06))
+        f3_s = np.exp(-((norm_x - 0.78)**2 / 0.007 + (norm_y - 0.75)**2 / 0.03))
+
+        inlets_potential = 0.85 * (f1_n + f1_s + f2_n + f2_s + f3_n + f3_s)
+
+        # 3. High-frequency Fractal Coastal Edges (Multi-scale Gaussian noise)
+        r1 = np.random.randn(HEIGHT, WIDTH)
+        r2 = np.random.randn(HEIGHT, WIDTH)
+
+        try:
+            from scipy import ndimage as ndi
+            g1 = ndi.gaussian_filter(r1, sigma=12.0)
+            g2 = ndi.gaussian_filter(r2, sigma=3.5)
+        except ImportError:
+            g1, g2 = r1, r2
+
+        fractal_noise = g1 * 0.60 + g2 * 0.40
+        fractal_norm = (fractal_noise - fractal_noise.min()) / (fractal_noise.max() - fractal_noise.min() + 1e-10)
+
+        # 4. Internal Hill Islands / Unflooded High Ground (creating internal holes like in reference image)
+        hill1 = np.exp(-((norm_x - 0.55)**2 / 0.003 + (norm_y - 0.50)**2 / 0.003))
+        hill2 = np.exp(-((norm_x - 0.78)**2 / 0.002 + (norm_y - 0.56)**2 / 0.002))
+        hill3 = np.exp(-((norm_x - 0.32)**2 / 0.002 + (norm_y - 0.54)**2 / 0.002))
+        island_mask = (hill1 + hill2 + hill3) > 0.45
+
+        # 5. Combined Coastal Inundation Potential
+        total_potential = main_bay_potential + inlets_potential + 0.35 * fractal_norm
+
+        # Channel mask for baseline pre-flood water
+        channel_mask = dist_axis < 0.025
+
+        # Single continuous coastal/estuarine flood inundation region (matching reference image)
+        flood_mask = (total_potential > 0.52) & (~island_mask)
+        flood_mask[0, :] = False
+        flood_mask[-1, :] = False
+        flood_mask[:, 0] = False
+        flood_mask[:, -1] = False
+
+        dem_data = (5.0 + 70.0 * (1.0 - total_potential)).astype(np.float32)
 
         dem_path = os.path.join(base_data_dir, "dem", "dem_elevation.tif")
         with rasterio.open(
@@ -178,11 +234,9 @@ def generate_scenario(base_data_dir: str = "data") -> None:
         print(" - Created data/dem/dem_elevation.tif")
 
         # Synthetic Sentinel Multi-band: Band 1=Blue, Band 2=Green, Band 3=Red, Band 4=NIR
-        # Pre-flood: dry baseline with a small river channel
         pre_raster = np.full((4, HEIGHT, WIDTH), 80.0, dtype=np.float32)
-        # Small permanent water channel in center
-        pre_raster[1, 95:105, :] = 120.0  # Green
-        pre_raster[3, 95:105, :] = 20.0   # NIR (low for water)
+        pre_raster[1, channel_mask] = 130.0  # Green
+        pre_raster[3, channel_mask] = 15.0   # Low NIR for water
 
         pre_path = os.path.join(base_data_dir, "input", "sample_pre_flood_sentinel.tif")
         with rasterio.open(
@@ -192,13 +246,11 @@ def generate_scenario(base_data_dir: str = "data") -> None:
             dst.write(pre_raster)
         print(" - Created data/input/sample_pre_flood_sentinel.tif")
 
-        # Post-flood: widespread flood plume in the central plain
+        # Post-flood multi-band raster: organic flood plume along river valley
         post_raster = np.copy(pre_raster)
-        # Inundate rows 70:140, cols 40:160
-        post_raster[1, 70:140, 40:160] = 140.0  # High green
-        post_raster[3, 70:140, 40:160] = 15.0   # Low NIR -> positive NDWI water signature
-        # Single-band differencing signal:
-        post_raster[0, 70:140, 40:160] = 220.0
+        post_raster[1, flood_mask] = 150.0  # Green
+        post_raster[3, flood_mask] = 10.0   # Low NIR -> positive NDWI
+        post_raster[0, flood_mask] = 220.0  # Single-band differencing signal
 
         post_path = os.path.join(base_data_dir, "input", "sample_post_flood_sentinel.tif")
         with rasterio.open(

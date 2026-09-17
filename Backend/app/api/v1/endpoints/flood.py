@@ -29,6 +29,7 @@ from app.schemas.flood import (
     PriorityScore,
     EvacuationCandidatesResult,
     EvacuationCandidate,
+    VLMAnalysisResult,
     PipelineResult,
 )
 
@@ -428,6 +429,19 @@ async def run_full_pipeline(
             )
         except Exception as exc:
             warnings.append(f"Evacuation analysis step failed: {exc}")
+
+    # Step 6: VLM Visual Comparison (Gemini Multimodal visual change description)
+    try:
+        from app.services.orchestration import AgentOrchestrationService
+        orchestration_svc = AgentOrchestrationService(api_key=settings.GEMINI_API_KEY)
+        vlm_res = orchestration_svc.generate_visual_comparison(pre_path, post_path)
+        pipeline.vlm_analysis = VLMAnalysisResult(**vlm_res)
+    except Exception as exc:
+        warnings.append(f"VLM visual comparison step encountered an error: {exc}")
+        pipeline.vlm_analysis = VLMAnalysisResult(
+            available=False,
+            comparison="VLM visual comparison could not be performed.",
+        )
 
     # Cache pipeline result for AI assistant
     pipeline.warnings = warnings

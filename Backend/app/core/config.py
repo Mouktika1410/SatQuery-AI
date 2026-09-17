@@ -11,27 +11,42 @@ from pydantic import BaseModel, Field
 
 
 def _load_env_file() -> None:
-    """Load key-value pairs from .env file into os.environ if present."""
+    """Load key-value pairs from all potential .env file locations into os.environ."""
+    module_dir = os.path.dirname(os.path.abspath(__file__))
+    app_dir = os.path.dirname(module_dir)
+    backend_dir = os.path.dirname(app_dir)
+    project_root = os.path.dirname(backend_dir)
+
     candidates = [
         os.path.join(os.getcwd(), ".env"),
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"),
-        os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), ".env"
-        ),
+        os.path.join(backend_dir, ".env"),
+        os.path.join(project_root, ".env"),
+        os.path.join(app_dir, ".env"),
     ]
+
+    seen = set()
     for path in candidates:
-        if os.path.isfile(path):
+        abs_p = os.path.abspath(path)
+        if abs_p in seen:
+            continue
+        seen.add(abs_p)
+
+        if os.path.isfile(abs_p):
             try:
-                with open(path, "r", encoding="utf-8") as f:
+                with open(abs_p, "r", encoding="utf-8") as f:
                     for line in f:
                         line = line.strip()
                         if line and not line.startswith("#") and "=" in line:
-                            key, _, val = line.partition("=")
+                            key, val = line.split("=", 1)
                             key = key.strip()
-                            val = val.strip().strip("'\"")
-                            if key and key not in os.environ:
-                                os.environ[key] = val
-                break
+                            val = val.strip()
+                            if "#" in val and not (val.startswith('"') or val.startswith("'")):
+                                val = val.split("#", 1)[0].strip()
+                            val = val.strip("'\"")
+                            if key:
+                                existing = os.environ.get(key, "").strip()
+                                if not existing and val:
+                                    os.environ[key] = val
             except Exception:
                 pass
 
@@ -87,10 +102,15 @@ class Settings(BaseModel):
         default_factory=lambda: os.getenv("POSTGRES_PASSWORD", "satquery")
     )
 
-    # AI / LLM configuration
-    GEMINI_API_KEY: Optional[str] = Field(
-        default_factory=lambda: os.getenv("GEMINI_API_KEY") or None
-    )
+    @property
+    def GEMINI_API_KEY(self) -> Optional[str]:
+        """Dynamically resolve Gemini API key from environment variables or .env files."""
+        _load_env_file()
+        for env_var in ("GEMINI_API_KEY", "GEMINI_KEY", "GOOGLE_API_KEY"):
+            val = os.getenv(env_var)
+            if val and val.strip():
+                return val.strip()
+        return None
 
     # Data directory configuration
     DATA_DIR: str = Field(

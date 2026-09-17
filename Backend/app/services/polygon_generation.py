@@ -93,14 +93,30 @@ class PolygonGenerationService:
                 mask=binary_mask,
                 transform=transform,
             )
+
+            img_bounds_geom = None
+            try:
+                h_img, w_img = binary_mask.shape
+                minx = transform.c
+                maxy = transform.f
+                maxx = minx + transform.a * w_img
+                miny = maxy + transform.e * h_img
+                from shapely.geometry import box
+                img_bounds_geom = box(min(minx, maxx), min(miny, maxy), max(minx, maxx), max(miny, maxy))
+            except Exception:
+                img_bounds_geom = None
+
             geometries = []
             for geom_dict, value in shapes_gen:
                 if value == 1:
                     geom = shape(geom_dict)
-                    # Fix invalid geometries
                     if not geom.is_valid:
                         geom = make_valid(geom)
                     if not geom.is_empty:
+                        # Ignore full-raster bounding box rectangle artifacts (> 95% total area)
+                        if img_bounds_geom and img_bounds_geom.area > 0:
+                            if (geom.area / img_bounds_geom.area) > 0.95:
+                                continue
                         geometries.append(geom)
 
             if not geometries:
@@ -115,8 +131,11 @@ class PolygonGenerationService:
                     "error": None,
                 }
 
-            # 2. Build GeoDataFrame with source CRS
-            gdf = gpd.GeoDataFrame(geometry=geometries, crs=crs_wkt)
+            # 2. Build GeoDataFrame with source CRS (use EPSG:4326 directly for geographic rasters to prevent WKT axis-order swapping)
+            if isinstance(crs_wkt, str) and ("4326" in crs_wkt or "WGS 84" in crs_wkt or "WGS84" in crs_wkt or "GEOGCS" in crs_wkt):
+                gdf = gpd.GeoDataFrame(geometry=geometries, crs="EPSG:4326")
+            else:
+                gdf = gpd.GeoDataFrame(geometry=geometries, crs=crs_wkt if crs_wkt else "EPSG:4326")
 
             # 3. Compute area in source CRS before reprojection
             try:

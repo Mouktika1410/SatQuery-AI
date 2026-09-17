@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { sendChatQuery } from '../services/api';
+import { Bot, Send, AlertCircle } from 'lucide-react';
 
 const SAMPLE_QUESTIONS = [
   'What is the flooded area?',
+  'What visual changes are seen by VLM?',
   'Which villages are most affected?',
   'How many buildings are affected?',
   'Show candidate evacuation sites',
@@ -95,11 +97,15 @@ export default function AiAssistant({ sessionId, pipelineResult }) {
   };
 
   return (
-    <div className="card" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <div className="card-title">🤖 AI Assistant</div>
+    <div className="card" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, height: '100%' }}>
+      <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <Bot size={16} color="#38bdf8" />
+        <span>AI Assistant</span>
+      </div>
 
-      <div className="chat-disclaimer">
-        ⚠️ Assistant only describes computed results. Always verify with ground surveys.
+      <div className="chat-disclaimer" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <AlertCircle size={14} color="#f59e0b" />
+        <span>Assistant describes computed results. Always verify with ground surveys.</span>
       </div>
 
       {!pipelineResult && (
@@ -153,11 +159,15 @@ export default function AiAssistant({ sessionId, pipelineResult }) {
           onKeyDown={handleKeyDown}
           disabled={isLoading}
         />
-        <button onClick={() => sendQuestion(input)} disabled={isLoading || !input.trim()}>
-          Send
+        <button
+          onClick={() => sendQuestion(input)}
+          disabled={isLoading || !input.trim()}
+          style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+        >
+          <Send size={14} />
+          <span>Send</span>
         </button>
       </div>
     </div>
   );
 }
-

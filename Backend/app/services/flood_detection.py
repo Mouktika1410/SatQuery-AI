@@ -185,21 +185,49 @@ class FloodDetectionService:
             notes.append("Post-image reprojected/resampled to match pre-image for NDWI.")
 
         # Compute NDWI for both images
-        pre_ndwi = (pre_green - pre_nir) / (pre_green + pre_nir + 1e-10)
-        post_ndwi = (post_green - post_nir) / (post_green + post_nir + 1e-10)
+        pre_denom = pre_green + pre_nir
+        post_denom = post_green + post_nir
 
-        threshold = opts.get("threshold")
-        if threshold is None:
-            threshold = 0.0  # Standard water/non-water NDWI boundary
+        pre_ndwi = np.where(pre_denom != 0, (pre_green - pre_nir) / (pre_denom + 1e-10), -1.0)
+        post_ndwi = np.where(post_denom != 0, (post_green - post_nir) / (post_denom + 1e-10), -1.0)
 
-        # Flood = pixels that are water in post but not (or less) in pre
-        post_water = (post_ndwi > threshold).astype(np.uint8)
-        pre_water = (pre_ndwi > threshold).astype(np.uint8)
-        flood_mask = np.where(post_water > pre_water, 1, 0).astype(np.uint8)
+        # Valid pixel mask (exclude nodata / zero padding / NaNs)
+        nodata_pre = pre_ds.nodata
+        nodata_post = post_ds.nodata
+        valid_mask = (pre_denom > 0) & (post_denom > 0) & ~np.isnan(pre_ndwi) & ~np.isnan(post_ndwi)
+        if nodata_pre is not None:
+            valid_mask &= (pre_green != nodata_pre) & (pre_nir != nodata_pre)
+        if nodata_post is not None:
+            valid_mask &= (post_green != nodata_post) & (post_nir != nodata_post)
+
+        ndwi_diff = post_ndwi - pre_ndwi
+        ndwi_diff[~valid_mask] = 0.0
+
+        user_threshold = opts.get("threshold")
+        if user_threshold is not None:
+            threshold = float(user_threshold)
+            notes.append(f"Using user-supplied threshold: {threshold:.4f}")
+        else:
+            pos_diff = ndwi_diff[valid_mask & (ndwi_diff > 0)]
+            if pos_diff.size > 0:
+                threshold = float(self._otsu_threshold(pos_diff))
+            else:
+                threshold = 0.15
+            notes.append(f"Auto NDWI change threshold computed: {threshold:.4f}")
+
+        # Flooded pixels: significant NDWI increase AND post_ndwi > 0 (water signature)
+        flood_mask = ((ndwi_diff >= threshold) & (post_ndwi > 0.0) & valid_mask).astype(np.uint8)
+
+        # Zero out outer 1-pixel border to eliminate frame boundary artifacts
+        if flood_mask.ndim == 2 and flood_mask.shape[0] > 2 and flood_mask.shape[1] > 2:
+            flood_mask[0, :] = 0
+            flood_mask[-1, :] = 0
+            flood_mask[:, 0] = 0
+            flood_mask[:, -1] = 0
 
         notes.append(
             f"NDWI detection: green_band={green_idx+1}, nir_band={nir_idx+1}, "
-            f"water_threshold={threshold}"
+            f"water_threshold={threshold:.4f}"
         )
         return flood_mask, "ndwi", notes
 
@@ -243,14 +271,18 @@ class FloodDetectionService:
         else:
             post_band = post_ds.read(1).astype(np.float32)
 
-        # Mask out nodata
+        # Mask out nodata and zero background
         nodata_pre = pre_ds.nodata
         nodata_post = post_ds.nodata
-        valid_mask = np.ones(pre_band.shape, dtype=bool)
+        valid_mask = ~np.isnan(pre_band) & ~np.isnan(post_band)
         if nodata_pre is not None:
             valid_mask &= pre_band != nodata_pre
         if nodata_post is not None:
             valid_mask &= post_band != nodata_post
+
+        # If image uses 0 as nodata/background
+        if np.any(pre_band > 0) and np.any(post_band > 0):
+            valid_mask &= (pre_band != 0) | (post_band != 0)
 
         diff = np.abs(post_band - pre_band)
         diff[~valid_mask] = 0.0
@@ -261,10 +293,22 @@ class FloodDetectionService:
             threshold = float(user_threshold)
             notes.append(f"Using user-supplied threshold: {threshold:.4f}")
         else:
-            threshold = self._otsu_threshold(diff[valid_mask])
+            diff_valid = diff[valid_mask & (diff > 0)]
+            if diff_valid.size > 0:
+                threshold = float(self._otsu_threshold(diff_valid))
+            else:
+                threshold = 0.0
             notes.append(f"Otsu auto-threshold computed: {threshold:.4f}")
 
-        flood_mask = (diff > threshold).astype(np.uint8)
+        flood_mask = ((diff > threshold) & valid_mask).astype(np.uint8)
+
+        # Zero out outer 1-pixel border to eliminate frame boundary artifacts
+        if flood_mask.ndim == 2 and flood_mask.shape[0] > 2 and flood_mask.shape[1] > 2:
+            flood_mask[0, :] = 0
+            flood_mask[-1, :] = 0
+            flood_mask[:, 0] = 0
+            flood_mask[:, -1] = 0
+
         return flood_mask, "differencing+otsu", notes
 
     # ------------------------------------------------------------------

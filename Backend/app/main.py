@@ -39,21 +39,18 @@ async def lifespan(app: FastAPI):
     for d in data_dirs:
         os.makedirs(d, exist_ok=True)
 
-    # Ensure synthetic sample GeoTIFF files exist in data/input/ and data/dem/
-    pre_sample = os.path.join(settings.data_input_dir, "sample_pre_flood_sentinel.tif")
-    post_sample = os.path.join(settings.data_input_dir, "sample_post_flood_sentinel.tif")
-    if not (os.path.isfile(pre_sample) and os.path.isfile(post_sample)):
-        try:
-            # Add scripts dir to sys.path to load create_synthetic_tifs
-            root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            scripts_dir = os.path.join(root_dir, "scripts")
-            if scripts_dir not in sys.path:
-                sys.path.insert(0, scripts_dir)
-            import create_synthetic_tifs
-            create_synthetic_tifs.generate_all_sample_files(settings.DATA_DIR)
-            logger.info("Generated sample synthetic GeoTIFF files in %s", settings.DATA_DIR)
-        except Exception as exc:
-            logger.debug("Synthetic GeoTIFF generation notice: %s", exc)
+    # Ensure fresh synthetic sample GeoTIFF files in data/input/ and data/dem/
+    try:
+        # Add scripts dir to sys.path to load create_synthetic_tifs
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        scripts_dir = os.path.join(root_dir, "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        import create_synthetic_tifs
+        create_synthetic_tifs.generate_all_sample_files(settings.DATA_DIR)
+        logger.info("Fresh synthetic GeoTIFF files generated in %s", settings.DATA_DIR)
+    except Exception as exc:
+        logger.debug("Synthetic GeoTIFF generation notice: %s", exc)
 
     logger.info("SatQuery %s starting up. Data directory: %s", settings.VERSION, settings.DATA_DIR)
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { Focus, Play, Maximize2, Minimize2, X, Layers, Satellite } from 'lucide-react';
 
 export default function MapViewer({
   floodGeoJSON,
@@ -12,6 +13,7 @@ export default function MapViewer({
   priorityScores,
   selectedFeature,
   onSelectFeature,
+  onReplaySequence,
 }) {
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
@@ -42,7 +44,7 @@ export default function MapViewer({
     const map = L.map(mapContainerRef.current, {
       center: [20.5937, 78.9629], // Center over India as broad neutral baseline
       zoom: 5,
-      zoomControl: false, // We will add a custom zoom control with clean position
+      zoomControl: false, // Custom zoom control with clean position
       attributionControl: true,
     });
 
@@ -70,8 +72,8 @@ export default function MapViewer({
     satellite.addTo(map);
 
     const baseMaps = {
-      '🛰️ Satellite': satellite,
-      '🗺️ Street Map': osm,
+      'Satellite': satellite,
+      'Street Map': osm,
     };
     baseLayersRef.current = baseMaps;
 
@@ -113,11 +115,11 @@ export default function MapViewer({
     };
   }, []);
 
-  // Reset / Fit to Analysis Extent handler
+  // Reset / Fit to Analysis Extent handler with smooth flyTo animation
   const handleResetBounds = useCallback(() => {
     const map = mapInstanceRef.current;
     if (map && lastAnalysisBoundsRef.current && lastAnalysisBoundsRef.current.isValid()) {
-      map.fitBounds(lastAnalysisBoundsRef.current, { padding: [45, 45], maxZoom: 13, animate: true });
+      map.flyToBounds(lastAnalysisBoundsRef.current, { padding: [60, 60], maxZoom: 14, duration: 1.8 });
     }
   }, []);
 
@@ -192,11 +194,14 @@ export default function MapViewer({
 
       const floodLayer = L.geoJSON(floodGeoJSON, {
         style: {
-          color: '#1e40af', // Deep blue border
-          weight: 2.5,
-          opacity: 0.95,
-          fillColor: '#3b82f6', // Vivid blue flood fill
-          fillOpacity: 0.52,
+          color: '#38bdf8', // Crisp cyan GIS boundary stroke
+          weight: 1.5,
+          opacity: 0.9,
+          fillColor: '#0284c7', // Semi-transparent blue flood inundation fill
+          fillOpacity: 0.32,
+          lineJoin: 'round',
+          lineCap: 'round',
+          smoothFactor: 1.0,
         },
         onEachFeature: (feature, lyr) => {
           // Hover highlighting
@@ -204,10 +209,10 @@ export default function MapViewer({
             mouseover: (e) => {
               const layer = e.target;
               layer.setStyle({
-                fillColor: '#60a5fa',
-                fillOpacity: 0.70,
-                weight: 3.5,
-                color: '#1d4ed8',
+                fillColor: '#38bdf8',
+                fillOpacity: 0.55,
+                weight: 2.5,
+                color: '#7dd3fc',
               });
             },
             mouseout: (e) => {
@@ -219,7 +224,6 @@ export default function MapViewer({
           lyr.bindPopup(
             '<div class="gis-popup flood-popup">' +
               '<div class="gis-popup-header">' +
-                '<span class="gis-popup-icon">🌊</span>' +
                 '<div class="gis-popup-title">Detected Flood Extent</div>' +
               '</div>' +
               '<div class="gis-popup-body">' +
@@ -247,7 +251,7 @@ export default function MapViewer({
 
       floodLayer.addTo(map);
       floodLayerRef.current = floodLayer;
-      layerControlRef.current?.addOverlay(floodLayer, '🌊 Flood Extent');
+      layerControlRef.current?.addOverlay(floodLayer, 'Flood Extent');
 
       try {
         const b = floodLayer.getBounds();
@@ -275,12 +279,14 @@ export default function MapViewer({
           const isSelected = selectedFeature?.type === 'village' && selectedFeature?.name?.toLowerCase().trim() === vName;
 
           return {
-            color: isSelected ? '#ef4444' : '#d97706', // Red highlight if selected, else amber
-            weight: isSelected ? 4 : 2.5,
-            opacity: 0.95,
+            color: isSelected ? '#ef4444' : '#f59e0b', // Subtle amber boundary, red if selected
+            weight: isSelected ? 2.5 : 1.2,
+            opacity: isSelected ? 0.95 : 0.75,
             fillColor: isSelected ? '#f87171' : '#fef3c7',
-            fillOpacity: isSelected ? 0.45 : 0.22,
-            dashArray: isSelected ? undefined : '5, 5',
+            fillOpacity: isSelected ? 0.3 : 0.08, // Very light fill so satellite imagery shows through
+            dashArray: isSelected ? undefined : '4, 4',
+            lineJoin: 'round',
+            lineCap: 'round',
           };
         },
         onEachFeature: (feature, lyr) => {
@@ -299,8 +305,8 @@ export default function MapViewer({
             mouseover: (e) => {
               const layer = e.target;
               layer.setStyle({
-                fillOpacity: 0.40,
-                weight: 3.5,
+                fillOpacity: 0.25,
+                weight: 2.2,
                 color: '#b45309',
               });
             },
@@ -318,7 +324,6 @@ export default function MapViewer({
           lyr.bindPopup(
             '<div class="gis-popup village-popup">' +
               '<div class="gis-popup-header">' +
-                '<span class="gis-popup-icon">🏘️</span>' +
                 `<div class="gis-popup-title">${rawName}</div>` +
                 (rank ? `<span class="gis-popup-badge badge-amber">Rank ${rank}</span>` : '') +
               '</div>' +
@@ -342,7 +347,7 @@ export default function MapViewer({
                     '</div>'
                   : '') +
                 '<div class="gis-popup-footnote alert-box">' +
-                  '⚠️ Heuristic decision-support score from spatial overlay. Field verification advised.' +
+                  'Heuristic decision-support score from spatial overlay. Field verification advised.' +
                 '</div>' +
               '</div>' +
             '</div>',
@@ -353,7 +358,7 @@ export default function MapViewer({
 
       villagesLayer.addTo(map);
       villagesLayerRef.current = villagesLayer;
-      layerControlRef.current?.addOverlay(villagesLayer, '🏘️ Affected Villages');
+      layerControlRef.current?.addOverlay(villagesLayer, 'Affected Villages');
 
       try {
         const b = villagesLayer.getBounds();
@@ -377,18 +382,22 @@ export default function MapViewer({
     if (affectedRoadsGeoJSON && affectedRoadsGeoJSON.features && affectedRoadsGeoJSON.features.length > 0) {
       const roadsLayer = L.geoJSON(affectedRoadsGeoJSON, {
         style: {
-          color: '#dc2626', // Bright high-contrast red
-          weight: 4.5,
-          opacity: 0.95,
-          dashArray: '5, 4',
+          color: '#ef4444', // High-visibility GIS red for inundated road corridors
+          weight: 3,
+          opacity: 0.85,
+          dashArray: '6, 6',
+          lineJoin: 'round',
+          lineCap: 'round',
+          smoothFactor: 1.0,
         },
+        pointToLayer: (feature, latlng) => null, // Never render point markers for road line geometries
         onEachFeature: (feature, lyr) => {
           const roadName = feature.properties?.name || 'Inundated Road Corridor';
           const highwayType = feature.properties?.highway || feature.properties?.type || 'Road Network';
 
           lyr.on({
             mouseover: (e) => {
-              e.target.setStyle({ weight: 6.5, color: '#b91c1c' });
+              e.target.setStyle({ weight: 5, color: '#b91c1c', opacity: 1.0 });
             },
             mouseout: (e) => {
               roadsLayer.resetStyle(e.target);
@@ -398,7 +407,6 @@ export default function MapViewer({
           lyr.bindPopup(
             '<div class="gis-popup road-popup">' +
               '<div class="gis-popup-header">' +
-                '<span class="gis-popup-icon">🛣️</span>' +
                 `<div class="gis-popup-title">${roadName}</div>` +
               '</div>' +
               '<div class="gis-popup-body">' +
@@ -407,7 +415,7 @@ export default function MapViewer({
                   `<span class="gis-popup-val font-mono">${highwayType}</span>` +
                 '</div>' +
                 '<div class="gis-popup-status-badge road-status-badge">' +
-                  '⚠️ Inundated / Submerged Segment — Impassable' +
+                  'Inundated / Submerged Segment — Impassable' +
                 '</div>' +
                 '<div class="gis-popup-footnote">Road vector geometry intersected with detected flood boundary</div>' +
               '</div>' +
@@ -419,7 +427,7 @@ export default function MapViewer({
 
       roadsLayer.addTo(map);
       roadsLayerRef.current = roadsLayer;
-      layerControlRef.current?.addOverlay(roadsLayer, '🛣️ Inundated Roads');
+      layerControlRef.current?.addOverlay(roadsLayer, 'Inundated Roads');
 
       try {
         const b = roadsLayer.getBounds();
@@ -448,17 +456,20 @@ export default function MapViewer({
 
         const isSelected = selectedFeature?.type === 'evac' && selectedFeature?.name?.toLowerCase().trim() === c.name?.toLowerCase().trim();
 
-        // High-visibility green pin with shadow
+        // Professional neutral GIS teardrop pin marker with center dot (NO checkmarks or ticks)
         const icon = L.divIcon({
           className: 'custom-evac-marker-wrapper',
           html: (
-            `<div class="custom-evac-pin ${isSelected ? 'selected-pin' : ''}">` +
-              '<span>✓</span>' +
+            `<div class="custom-gis-pin ${isSelected ? 'selected-pin' : ''}">` +
+              '<svg width="20" height="26" viewBox="0 0 24 30" fill="none" xmlns="http://www.w3.org/2000/svg">' +
+                '<path d="M12 0C5.37 0 0 5.37 0 12C0 21 12 30 12 30C12 30 24 21 24 12C24 5.37 18.63 0 12 0ZM12 16C9.79 16 8 14.21 8 12C8 9.79 9.79 8 12 8C14.21 8 16 9.79 16 12C16 14.21 14.21 16 12 16Z" fill="#0ea5e9" stroke="#ffffff" stroke-width="1.5"/>' +
+                '<circle cx="12" cy="12" r="3.5" fill="#ffffff"/>' +
+              '</svg>' +
             '</div>'
           ),
-          iconSize: [22, 22],
-          iconAnchor: [11, 11],
-          popupAnchor: [0, -10],
+          iconSize: [20, 26],
+          iconAnchor: [10, 26],
+          popupAnchor: [0, -24],
         });
 
         const marker = L.marker([c.lat, c.lon], { icon });
@@ -476,7 +487,6 @@ export default function MapViewer({
         marker.bindPopup(
           '<div class="gis-popup evac-popup">' +
             '<div class="gis-popup-header">' +
-              '<span class="gis-popup-icon">🏫</span>' +
               `<div class="gis-popup-title">${c.name}</div>` +
               `<span class="gis-popup-badge badge-green">${c.type}</span>` +
             '</div>' +
@@ -496,7 +506,7 @@ export default function MapViewer({
                 `<span class="gis-popup-val font-mono" style="font-size:11px">${coordsStr}</span>` +
               '</div>' +
               '<div class="gis-popup-footnote alert-box-warning">' +
-                '⚠️ <b>CANDIDATE SITE ONLY:</b> Requires on-ground physical inspection. NOT a verified shelter.' +
+                '<b>CANDIDATE SITE ONLY:</b> Requires on-ground physical inspection. NOT a verified shelter.' +
               '</div>' +
             '</div>' +
           '</div>',
@@ -511,16 +521,16 @@ export default function MapViewer({
 
       group.addTo(map);
       evacuLayerRef.current = group;
-      layerControlRef.current?.addOverlay(group, '🏫 Evacuation Sites');
+      layerControlRef.current?.addOverlay(group, 'Evacuation Sites');
     }
 
     // -------------------------------------------------------------------------
-    // 5. FIT BOUNDS SMOOTHLY TO DETECTED EXTENT
+    // 5. FLY TO BOUNDS SMOOTHLY TO DETECTED EXTENT
     // -------------------------------------------------------------------------
     if (combinedBounds && combinedBounds.isValid()) {
       lastAnalysisBoundsRef.current = combinedBounds;
       try {
-        map.fitBounds(combinedBounds, { padding: [40, 40], maxZoom: 13, animate: true });
+        map.flyToBounds(combinedBounds, { padding: [60, 60], maxZoom: 14, duration: 2.0, animate: true });
       } catch (_) {}
     }
 
@@ -545,7 +555,7 @@ export default function MapViewer({
     <div className={`map-wrapper ${isFullscreen ? 'fullscreen' : ''}`}>
       {!hasData && (
         <div className="map-no-data">
-          <span className="map-no-data-icon">🛰️</span>
+          <Satellite size={40} color="#38bdf8" className="map-no-data-icon" />
           <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.95rem' }}>
             Interactive GIS Flood Analysis Map
           </div>
@@ -556,17 +566,31 @@ export default function MapViewer({
       {/* Main Map Container */}
       <div ref={mapContainerRef} className="leaflet-map-container" />
 
-      {/* Floating Map Toolbar Controls (Zoom, Fit Bounds, Fullscreen) */}
+      {/* Floating Map Toolbar Controls (Zoom, Fit Bounds, Replay Sequence, Fullscreen) */}
       <div className="map-action-toolbar">
         {hasData && (
-          <button
-            className="map-tool-btn"
-            onClick={handleResetBounds}
-            title="Fit to analysis extent"
-            aria-label="Fit to analysis extent"
-          >
-            🎯 <span className="btn-text">Reset Extent</span>
-          </button>
+          <>
+            <button
+              className="map-tool-btn"
+              onClick={handleResetBounds}
+              title="Fit to analysis extent"
+              aria-label="Fit to analysis extent"
+            >
+              <Focus size={15} />
+              <span className="btn-text">Reset Extent</span>
+            </button>
+            {onReplaySequence && (
+              <button
+                className="map-tool-btn"
+                onClick={onReplaySequence}
+                title="Replay Satellite Detection Sequence"
+                aria-label="Replay Satellite Detection Sequence"
+              >
+                <Play size={15} />
+                <span className="btn-text">Replay Sequence</span>
+              </button>
+            )}
+          </>
         )}
         <button
           className="map-tool-btn"
@@ -574,20 +598,21 @@ export default function MapViewer({
           title={isFullscreen ? 'Exit Fullscreen' : 'View Fullscreen'}
           aria-label="Toggle Fullscreen"
         >
-          {isFullscreen ? '✕ Exit' : '⛶ Fullscreen'}
+          {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          <span className="btn-text">{isFullscreen ? 'Exit' : 'Fullscreen'}</span>
         </button>
       </div>
 
       {/* Active Selection Indicator */}
       {selectedFeature && (
         <div className="map-selection-banner">
-          <span>Selected {selectedFeature.type === 'village' ? '🏘️ Village' : '🏫 Site'}: <b>{selectedFeature.name}</b></span>
+          <span>Selected {selectedFeature.type === 'village' ? 'Village' : 'Site'}: <b>{selectedFeature.name}</b></span>
           <button
             className="banner-close-btn"
             onClick={() => onSelectFeature && onSelectFeature(null)}
             title="Clear selection"
           >
-            ✕
+            <X size={14} />
           </button>
         </div>
       )}
@@ -596,8 +621,10 @@ export default function MapViewer({
       {hasData && (
         <div className="map-legend">
           <div className="legend-title-row">
-            <span>🗺️ GIS Layers</span>
-            <span className="legend-indicator">EPSG:4326</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Layers size={14} color="#38bdf8" /> GIS Layers
+            </span>
+            <span className="legend-indicator font-mono">EPSG:4326</span>
           </div>
 
           <div className={`legend-item ${activeLayers.flood ? '' : 'layer-off'}`}>
@@ -648,4 +675,3 @@ export default function MapViewer({
     </div>
   );
 }
-

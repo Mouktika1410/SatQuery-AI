@@ -54,9 +54,28 @@ def test_full_synthetic_pipeline():
         pre_path = os.path.join(tmpdir, "pre.tif")
         _create_geotiff(pre_path, pre_data)
 
-        # Create post-image: bright rectangle (simulated flood)
+        # Create post-image: single broad organic flood region
+        np.random.seed(42)
+        grid_y, grid_x = np.ogrid[:64, :64]
+        norm_x = grid_x / 63.0
+        norm_y = grid_y / 63.0
+        r_dist = np.sqrt((norm_x - 0.50)**2 + (norm_y - 0.48)**2)
+
+        r1 = np.random.randn(64, 64)
+        r2 = np.random.randn(64, 64)
+        try:
+            from scipy import ndimage as ndi
+            g1 = ndi.gaussian_filter(r1, sigma=7.0)
+            g2 = ndi.gaussian_filter(r2, sigma=2.5)
+        except ImportError:
+            g1, g2 = r1, r2
+
+        noise = g1 * 0.65 + g2 * 0.35
+        noise = (noise - noise.min()) / (noise.max() - noise.min() + 1e-10)
+        organic_mask = r_dist < (0.22 + 0.22 * noise)
+
         post_data = np.full((1, 64, 64), 10.0, dtype=np.float32)
-        post_data[0, 20:45, 20:45] = 200.0
+        post_data[0, organic_mask] = 200.0
         post_path = os.path.join(tmpdir, "post.tif")
         _create_geotiff(post_path, post_data)
 
