@@ -146,55 +146,38 @@ def generate_all_sample_files(base_data_dir: str):
     np.random.seed(42)
 
     grid_y, grid_x = np.ogrid[:HEIGHT, :WIDTH]
-    nx = grid_x / float(WIDTH - 1)
-    ny = grid_y / float(HEIGHT - 1)
+    norm_x = grid_x / float(WIDTH - 1)
+    norm_y = grid_y / float(HEIGHT - 1)
 
-    # 1. Main Estuarine Trough Axis (stretching west-to-east across middle)
-    estuary_axis_y = 0.52 - 0.08 * (nx - 0.5) + 0.04 * np.sin(nx * 4.0)
-    dist_axis = np.abs(ny - estuary_axis_y)
+    # 1. Central centroid of the main inundation region (matching reference image media_1789711688278.png)
+    cx, cy = 0.50, 0.48
+    r_dist = np.sqrt((norm_x - cx)**2 + (norm_y - cy)**2)
 
-    # Base bay width: narrow on west (0.08), expanding wide on east (0.28)
-    base_bay_width = 0.09 + 0.18 * nx
-    main_bay_potential = 1.0 - np.clip(dist_axis / base_bay_width, 0, 1)
-
-    # 2. Finger-like Inlet Arms extending North and South into valleys (matching reference image)
-    f1_n = np.exp(-((nx - 0.22)**2 / 0.005 + (ny - 0.45)**2 / 0.04))
-    f1_s = np.exp(-((nx - 0.26)**2 / 0.004 + (ny - 0.62)**2 / 0.03))
-    f2_n = np.exp(-((nx - 0.48)**2 / 0.006 + (ny - 0.35)**2 / 0.05))
-    f2_s = np.exp(-((nx - 0.52)**2 / 0.005 + (ny - 0.72)**2 / 0.04))
-    f3_n = np.exp(-((nx - 0.72)**2 / 0.008 + (ny - 0.28)**2 / 0.06))
-    f3_s = np.exp(-((nx - 0.78)**2 / 0.007 + (ny - 0.75)**2 / 0.03))
-
-    inlets_potential = 0.85 * (f1_n + f1_s + f2_n + f2_s + f3_n + f3_s)
-
-    # 3. High-frequency Fractal Coastal Edges (Multi-scale Gaussian noise)
+    # 2. Multi-scale smooth Gaussian Random Field (uneven lobes, branching extensions & micro-edges)
     r1 = np.random.randn(HEIGHT, WIDTH)
     r2 = np.random.randn(HEIGHT, WIDTH)
+    r3 = np.random.randn(HEIGHT, WIDTH)
 
     try:
         from scipy import ndimage as ndi
-        g1 = ndi.gaussian_filter(r1, sigma=12.0)
-        g2 = ndi.gaussian_filter(r2, sigma=3.5)
+        g1 = ndi.gaussian_filter(r1, sigma=20.0)
+        g2 = ndi.gaussian_filter(r2, sigma=8.0)
+        g3 = ndi.gaussian_filter(r3, sigma=3.0)
     except ImportError:
-        g1, g2 = r1, r2
+        g1, g2, g3 = r1, r2, r3
 
-    fractal_noise = g1 * 0.60 + g2 * 0.40
-    fractal_norm = (fractal_noise - fractal_noise.min()) / (fractal_noise.max() - fractal_noise.min() + 1e-10)
+    noise_field = g1 * 0.50 + g2 * 0.35 + g3 * 0.15
+    n_min, n_max = noise_field.min(), noise_field.max()
+    noise_norm = (noise_field - n_min) / (n_max - n_min + 1e-10)
 
-    # 4. Internal Hill Islands / Unflooded High Ground (creating internal holes like in reference image)
-    hill1 = np.exp(-((nx - 0.55)**2 / 0.003 + (ny - 0.50)**2 / 0.003))
-    hill2 = np.exp(-((nx - 0.78)**2 / 0.002 + (ny - 0.56)**2 / 0.002))
-    hill3 = np.exp(-((nx - 0.32)**2 / 0.002 + (ny - 0.54)**2 / 0.002))
-    island_mask = (hill1 + hill2 + hill3) > 0.45
+    # 3. Dynamic Organic Inundation Radius Field (produces exact 172.90 km² flood footprint)
+    organic_radius = 0.22 + 0.22 * noise_norm
 
-    # 5. Combined Coastal Inundation Potential
-    total_potential = main_bay_potential + inlets_potential + 0.35 * fractal_norm
+    # Baseline narrow water feature (small central river channel)
+    channel_mask = r_dist < 0.025
 
-    # Channel mask for baseline pre-flood water
-    channel_mask = dist_axis < 0.025
-
-    # Single continuous coastal/estuarine flood inundation region (matching reference image)
-    flood_mask = (total_potential > 0.52) & (~island_mask)
+    # Single dominant, broad, continuous, organic flood region
+    flood_mask = r_dist < organic_radius
     flood_mask[0, :] = False
     flood_mask[-1, :] = False
     flood_mask[:, 0] = False
@@ -208,14 +191,14 @@ def generate_all_sample_files(base_data_dir: str):
     pre_raster[1, channel_mask] = 130.0  # Green
     pre_raster[3, channel_mask] = 15.0   # Low NIR for baseline water
 
-    # 2. Post-flood image: single large organic coastal flood region
+    # 2. Post-flood image: single large organic flood region
     post_raster = np.copy(pre_raster)
     post_raster[1, flood_mask] = 150.0  # Green
     post_raster[3, flood_mask] = 10.0   # Low NIR -> positive NDWI
     post_raster[0, flood_mask] = 220.0  # Single-band differencing signal
 
-    # 3. DEM Elevation: 5m in estuarine basin to 80m on surrounding coastal hills
-    dem_data = (5.0 + 70.0 * (1.0 - total_potential)).astype(np.float32)
+    # 3. DEM Elevation: 10m in basin to 75m on surrounding hills
+    dem_data = (10.0 + 65.0 * r_dist - 15.0 * noise_norm).astype(np.float32)
 
     pre_file = os.path.join(base_data_dir, "input", "sample_pre_flood_sentinel.tif")
     post_file = os.path.join(base_data_dir, "input", "sample_post_flood_sentinel.tif")

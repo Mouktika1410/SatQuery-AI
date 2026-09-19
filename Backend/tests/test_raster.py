@@ -141,7 +141,6 @@ def test_differencing_detection_synthetic():
         grid_y, grid_x = np.ogrid[:64, :64]
         norm_x = grid_x / 63.0
         norm_y = grid_y / 63.0
-        r_dist = np.sqrt((norm_x - 0.50)**2 + (norm_y - 0.48)**2)
 
         r1 = np.random.randn(64, 64)
         r2 = np.random.randn(64, 64)
@@ -152,9 +151,10 @@ def test_differencing_detection_synthetic():
         except ImportError:
             g1, g2 = r1, r2
 
-        noise = g1 * 0.65 + g2 * 0.35
-        noise = (noise - noise.min()) / (noise.max() - noise.min() + 1e-10)
-        organic_mask = r_dist < (0.22 + 0.22 * noise)
+        terrain = 0.4 * norm_y - 0.3 * norm_x + 0.5 * (g1 + g2)
+        t_min, t_max = terrain.min(), terrain.max()
+        terrain_norm = (terrain - t_min) / (t_max - t_min + 1e-10)
+        organic_mask = terrain_norm < 0.40
 
         post_data = np.full((1, 64, 64), 10.0, dtype=np.float32)
         post_data[0, organic_mask] = 200.0  # organic flood region
