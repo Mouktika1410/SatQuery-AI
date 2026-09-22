@@ -27,6 +27,7 @@ except ImportError:
 # Map logical layer names to subdirectory paths
 _LAYER_DIRS = {
     "villages": "boundaries",
+    "villages_visual": "boundaries",
     "population": "population",
     "buildings": "buildings",
     "roads": "roads",
@@ -74,7 +75,13 @@ class GISRepository:
         subdir = _LAYER_DIRS[layer_type]
         directory = os.path.join(self.data_dir, subdir)
 
-        file_path = self._find_file(directory, _VECTOR_EXTENSIONS)
+        # Check for specific layer filename first (e.g., villages_visual.geojson or villages.geojson)
+        specific_file = os.path.join(directory, f"{layer_type}.geojson")
+        if os.path.isfile(specific_file):
+            file_path = specific_file
+        else:
+            file_path = self._find_file(directory, _VECTOR_EXTENSIONS)
+
         if not file_path:
             logger.info("No vector spatial file found for layer '%s' in %s", layer_type, directory)
             return None
@@ -123,13 +130,11 @@ class GISRepository:
                 else:
                     x, y = lon, lat
 
-                row, col = ds.index(x, y)
-                if 0 <= row < ds.height and 0 <= col < ds.width:
-                    window = rasterio.windows.Window(col, row, 1, 1)
-                    val = ds.read(1, window=window)[0, 0]
-                    if ds.nodata is not None and val == ds.nodata:
+                for val in ds.sample([(x, y)]):
+                    elevation = float(val[0])
+                    if ds.nodata is not None and elevation == ds.nodata:
                         return None
-                    return round(float(val), 1)
+                    return elevation
         except Exception as exc:
             logger.debug("DEM elevation sampling failed at (%f, %f): %s", lat, lon, exc)
 
@@ -141,6 +146,8 @@ class GISRepository:
         """
         result: Dict[str, bool] = {}
         for layer_type, subdir in _LAYER_DIRS.items():
+            if layer_type == "villages_visual":
+                continue
             directory = os.path.join(self.data_dir, subdir)
             if layer_type == "dem":
                 result[layer_type] = self._find_file(directory, _RASTER_EXTENSIONS) is not None

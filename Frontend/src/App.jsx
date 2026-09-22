@@ -18,13 +18,17 @@ import {
   BookOpen,
   ChevronDown,
   ChevronUp,
-  AlertTriangle
+  AlertTriangle,
+  Layers,
+  Globe,
+  Activity,
+  ShieldCheck
 } from 'lucide-react';
 
 export default function App() {
   const [showLanding, setShowLanding] = useState(true);
   const [showTransition, setShowTransition] = useState(false);
-  const [activeTab, setActiveTab] = useState('map');
+  const [activeTab, setActiveTab] = useState('upload');
 
   const [analysisState, setAnalysisState] = useState('idle');
   const [sessionId, setSessionId] = useState(null);
@@ -64,9 +68,9 @@ export default function App() {
     setActiveTab('map');
   }, []);
 
-  const handleGetStarted = useCallback((targetTab = 'map') => {
+  const handleGetStarted = useCallback((targetTab) => {
     setShowLanding(false);
-    setActiveTab(targetTab);
+    setActiveTab(targetTab || 'upload');
   }, []);
 
   const handleGoHome = useCallback(() => {
@@ -369,49 +373,58 @@ export default function App() {
           {/* TAB 4: UPLOAD & METHODOLOGY */}
           {activeTab === 'upload' && (
             <div className="upload-view-container">
-              <div className="upload-left-col">
-                <UploadSection
-                  onRunAnalysis={handleRunAnalysis}
-                  isRunning={analysisState === 'running'}
-                />
-              </div>
+              {/* Top Row: 2 Equal Column Cards matching Reference Image */}
+              <div className="upload-top-grid">
+                {/* Left Column: Image Ingestion & Analysis */}
+                <div className="upload-ingestion-card card">
+                  <UploadSection
+                    onRunAnalysis={handleRunAnalysis}
+                    isRunning={analysisState === 'running'}
+                  />
+                </div>
 
-              <div className="upload-right-col">
-                <div className="card">
-                  <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <BookOpen size={16} color="#38bdf8" />
-                    <span>Analysis Methodology</span>
+                {/* Right Column: Analysis Methodology */}
+                <div className="upload-methodology-card card">
+                  <div className="methodology-card-header">
+                    <div className="card-title-group">
+                      <BookOpen size={18} color="#38bdf8" />
+                      <div>
+                        <h3 className="card-heading font-sans">ANALYSIS METHODOLOGY</h3>
+                        <p className="card-subheading font-mono">From raw satellite data to actionable disaster intelligence</p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="methodology-list">
-                    <div className="method-step">
-                      <span className="step-num">01</span>
-                      <div className="step-content">
-                        <h4>Georeferenced Raster Alignment</h4>
-                        <p>Validates EPSG coordinate reference systems, pixel affine matrices, and bounding overlap between pre-event and post-event satellite scenes.</p>
+
+                  <div className="methodology-steps-list">
+                    <div className="method-step-item">
+                      <div className="step-badge-num font-mono">01</div>
+                      <div className="step-details">
+                        <h4 className="font-sans">Georeferenced Raster Alignment</h4>
+                        <p className="font-sans">Validates EPSG coordinate reference systems, pixel affine matrices, and bounding overlap between pre-event and post-event satellite scenes.</p>
                       </div>
                     </div>
 
-                    <div className="method-step">
-                      <span className="step-num">02</span>
-                      <div className="step-content">
-                        <h4>Adaptive Water Inundation Detection</h4>
-                        <p>Computes multi-band NDWI = (Green - NIR)/(Green + NIR) or adaptive Otsu histogram thresholding on single-band differences.</p>
+                    <div className="method-step-item">
+                      <div className="step-badge-num font-mono">02</div>
+                      <div className="step-details">
+                        <h4 className="font-sans">Adaptive Water Inundation Detection</h4>
+                        <p className="font-sans">Computes multi-band NDWI = (Green - NIR)/(Green + NIR) or adaptive Otsu histogram thresholding on single-band differences.</p>
                       </div>
                     </div>
 
-                    <div className="method-step">
-                      <span className="step-num">03</span>
-                      <div className="step-content">
-                        <h4>Vector Polygon Simplification</h4>
-                        <p>Extracts raster pixel contours using <code>rasterio.features.shapes</code>, buffers geometry artifacts, and simplifies vertices to 0.0001° tolerance.</p>
+                    <div className="method-step-item">
+                      <div className="step-badge-num font-mono">03</div>
+                      <div className="step-details">
+                        <h4 className="font-sans">Vector Polygon Simplification</h4>
+                        <p className="font-sans">Extracts raster pixel contours using <code>rasterio.features.shapes</code>, buffers geometry artifacts, and simplifies vertices to 0.0001° tolerance.</p>
                       </div>
                     </div>
 
-                    <div className="method-step">
-                      <span className="step-num">04</span>
-                      <div className="step-content">
-                        <h4>Spatial Overlay & Vulnerability Prioritization</h4>
-                        <p>Intersects inundation vectors with local village boundaries, road networks, and screening candidate evacuation sites outside 100m buffer zones.</p>
+                    <div className="method-step-item">
+                      <div className="step-badge-num font-mono">04</div>
+                      <div className="step-details">
+                        <h4 className="font-sans">Spatial Overlay & Vulnerability Prioritization</h4>
+                        <p className="font-sans">Intersects inundation vectors with local village boundaries, road networks, and screening candidate evacuation sites outside 100m buffer zones.</p>
                       </div>
                     </div>
                   </div>

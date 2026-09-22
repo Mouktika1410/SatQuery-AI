@@ -140,109 +140,11 @@ def create_geotiff_pure_python(filename: str, array_2d: np.ndarray, min_lon: flo
 
 
 def generate_all_sample_files(base_data_dir: str):
-    os.makedirs(os.path.join(base_data_dir, "input"), exist_ok=True)
-    os.makedirs(os.path.join(base_data_dir, "dem"), exist_ok=True)
-
-    np.random.seed(42)
-
-    grid_y, grid_x = np.ogrid[:HEIGHT, :WIDTH]
-    norm_x = grid_x / float(WIDTH - 1)
-    norm_y = grid_y / float(HEIGHT - 1)
-
-    # 1. Central centroid of the main inundation region (matching reference image media_1789711688278.png)
-    cx, cy = 0.50, 0.48
-    r_dist = np.sqrt((norm_x - cx)**2 + (norm_y - cy)**2)
-
-    # 2. Multi-scale smooth Gaussian Random Field (uneven lobes, branching extensions & micro-edges)
-    r1 = np.random.randn(HEIGHT, WIDTH)
-    r2 = np.random.randn(HEIGHT, WIDTH)
-    r3 = np.random.randn(HEIGHT, WIDTH)
-
-    try:
-        from scipy import ndimage as ndi
-        g1 = ndi.gaussian_filter(r1, sigma=20.0)
-        g2 = ndi.gaussian_filter(r2, sigma=8.0)
-        g3 = ndi.gaussian_filter(r3, sigma=3.0)
-    except ImportError:
-        g1, g2, g3 = r1, r2, r3
-
-    noise_field = g1 * 0.50 + g2 * 0.35 + g3 * 0.15
-    n_min, n_max = noise_field.min(), noise_field.max()
-    noise_norm = (noise_field - n_min) / (n_max - n_min + 1e-10)
-
-    # 3. Dynamic Organic Inundation Radius Field (produces exact 172.90 km² flood footprint)
-    organic_radius = 0.22 + 0.22 * noise_norm
-
-    # Baseline narrow water feature (small central river channel)
-    channel_mask = r_dist < 0.025
-
-    # Single dominant, broad, continuous, organic flood region
-    flood_mask = r_dist < organic_radius
-    flood_mask[0, :] = False
-    flood_mask[-1, :] = False
-    flood_mask[:, 0] = False
-    flood_mask[:, -1] = False
-
-    # 1. Pre-flood baseline: background dry terrain with narrow baseline water
-    # Band 1=Blue, Band 2=Green, Band 3=Red, Band 4=NIR
-    pre_raster = np.full((4, HEIGHT, WIDTH), 80.0, dtype=np.float32)
-    pre_raster += np.random.uniform(0.0, 4.0, (4, HEIGHT, WIDTH)).astype(np.float32)
-
-    pre_raster[1, channel_mask] = 130.0  # Green
-    pre_raster[3, channel_mask] = 15.0   # Low NIR for baseline water
-
-    # 2. Post-flood image: single large organic flood region
-    post_raster = np.copy(pre_raster)
-    post_raster[1, flood_mask] = 150.0  # Green
-    post_raster[3, flood_mask] = 10.0   # Low NIR -> positive NDWI
-    post_raster[0, flood_mask] = 220.0  # Single-band differencing signal
-
-    # 3. DEM Elevation: 10m in basin to 75m on surrounding hills
-    dem_data = (10.0 + 65.0 * r_dist - 15.0 * noise_norm).astype(np.float32)
-
+    import generate_sample_data
+    generate_sample_data.generate_scenario(base_data_dir)
     pre_file = os.path.join(base_data_dir, "input", "sample_pre_flood_sentinel.tif")
     post_file = os.path.join(base_data_dir, "input", "sample_post_flood_sentinel.tif")
     dem_file = os.path.join(base_data_dir, "dem", "dem_elevation.tif")
-
-    written = False
-    try:
-        import rasterio
-        from rasterio.transform import from_bounds
-        from rasterio.crs import CRS
-        transform = from_bounds(MIN_LON, MIN_LAT, MAX_LON, MAX_LAT, WIDTH, HEIGHT)
-        crs = CRS.from_epsg(4326)
-
-        profile = {
-            "driver": "GTiff",
-            "height": HEIGHT,
-            "width": WIDTH,
-            "count": 4,
-            "dtype": rasterio.float32,
-            "crs": crs,
-            "transform": transform,
-            "nodata": -9999.0,
-        }
-        with rasterio.open(pre_file, "w", **profile) as dst:
-            dst.write(pre_raster)
-        with rasterio.open(post_file, "w", **profile) as dst:
-            dst.write(post_raster)
-
-        dem_profile = profile.copy()
-        dem_profile["count"] = 1
-        with rasterio.open(dem_file, "w", **dem_profile) as dst:
-            dst.write(dem_data, 1)
-        written = True
-    except Exception:
-        pass
-
-    if not written:
-        create_geotiff_pure_python(pre_file, pre_raster[0], MIN_LON, MIN_LAT, MAX_LON, MAX_LAT)
-        create_geotiff_pure_python(post_file, post_raster[0], MIN_LON, MIN_LAT, MAX_LON, MAX_LAT)
-        create_geotiff_pure_python(dem_file, dem_data, MIN_LON, MIN_LAT, MAX_LON, MAX_LAT)
-
-    print(f"Created: {pre_file}")
-    print(f"Created: {post_file}")
-    print(f"Created: {dem_file}")
     return pre_file, post_file, dem_file
 
 

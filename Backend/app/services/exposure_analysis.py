@@ -84,9 +84,12 @@ class ExposureAnalysisService:
 
         # --- Villages -------------------------------------------------------
         villages_gdf = gis_repo.load_layer("villages")
+        visual_villages_gdf = gis_repo.load_layer("villages_visual")
         if villages_gdf is not None:
             result["data_availability"]["villages"] = True
-            affected, villages_geojson = self._compute_affected_villages(flood_gdf, villages_gdf)
+            affected, villages_geojson = self._compute_affected_villages(
+                flood_gdf, villages_gdf, visual_villages_gdf
+            )
             result["affected_villages"] = affected
             result["affected_villages_geojson"] = villages_geojson
 
@@ -119,14 +122,14 @@ class ExposureAnalysisService:
     # ------------------------------------------------------------------
 
     def _compute_affected_villages(
-        self, flood_gdf: Any, villages_gdf: Any
+        self, flood_gdf: Any, villages_gdf: Any, visual_villages_gdf: Optional[Any] = None
     ) -> tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
         """Intersect village boundaries with flood polygon and compute overlap area."""
         try:
             if villages_gdf.crs != flood_gdf.crs:
                 villages_gdf = villages_gdf.to_crs(flood_gdf.crs)
 
-            # Intersect villages with flood
+            # Intersect villages with flood (analytical closed polygon calculations)
             intersected = self._overlay.overlay_flood_with_layers(
                 flood_gdf, "villages", villages_gdf
             )
@@ -158,10 +161,21 @@ class ExposureAnalysisService:
             # Sort by area descending
             results.sort(key=lambda x: x["area_flooded_km2"], reverse=True)
 
-            # Export intersected villages as WGS84 GeoJSON
+            # Export village boundary geometries of affected villages as WGS84 GeoJSON.
+            # If visual_villages_gdf is provided, use it for the display overlay
+            # (keeping open dashed lines for map rendering while preserving analytical values).
             try:
-                intersected_wgs84 = intersected.to_crs("EPSG:4326")
-                villages_geojson = json.loads(intersected_wgs84.to_json())
+                affected_names = {r["name"] for r in results}
+                target_gdf = visual_villages_gdf if visual_villages_gdf is not None else villages_gdf
+                if target_gdf.crs != "EPSG:4326":
+                    target_gdf = target_gdf.to_crs("EPSG:4326")
+                orig_name_col = self._find_name_column(target_gdf)
+                if orig_name_col:
+                    affected_gdf = target_gdf[target_gdf[orig_name_col].isin(affected_names)].copy()
+                else:
+                    affected_gdf = target_gdf.copy()
+                affected_wgs84 = affected_gdf.to_crs("EPSG:4326")
+                villages_geojson = json.loads(affected_wgs84.to_json())
             except Exception:
                 villages_geojson = None
 
@@ -180,6 +194,23 @@ class ExposureAnalysisService:
                 roads_gdf = roads_gdf.to_crs(flood_gdf.crs)
 
             clipped = gpd.clip(roads_gdf, flood_gdf)
+            if clipped.empty:
+                return 0.0, None
+
+            from shapely.geometry import LineString as SLineString, MultiLineString as SMultiLineString
+            def _extract_lines(geom: Any) -> Any:
+                if geom is None or geom.is_empty:
+                    return None
+                if isinstance(geom, (SLineString, SMultiLineString)):
+                    return geom
+                if hasattr(geom, "geoms"):
+                    lines = [g for g in geom.geoms if isinstance(g, (SLineString, SMultiLineString))]
+                    if lines:
+                        return SMultiLineString(lines) if len(lines) > 1 else lines[0]
+                return None
+
+            clipped["geometry"] = clipped["geometry"].apply(_extract_lines)
+            clipped = clipped[clipped.geometry.notnull() & ~clipped.geometry.is_empty]
             if clipped.empty:
                 return 0.0, None
 

@@ -10,10 +10,10 @@ const STATE_STEP_MAP = {
 };
 
 const STATUS_TEXT = {
-  idle: '🛰️  Upload two georeferenced GeoTIFF images to begin analysis.',
-  running: '⏳  Running flood analysis pipeline…',
-  complete: '✅  Analysis complete. Results shown on map and panels.',
-  error: '❌  Analysis failed.',
+  idle: 'Upload two georeferenced GeoTIFF images to begin analysis.',
+  running: 'Running flood analysis pipeline…',
+  complete: 'Analysis complete. Results shown on map and panels.',
+  error: 'Analysis failed.',
 };
 
 export default function StatusIndicator({ state, error }) {

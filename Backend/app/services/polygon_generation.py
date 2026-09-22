@@ -25,7 +25,8 @@ except ImportError:
 
 try:
     import geopandas as gpd
-    from shapely.geometry import shape, mapping
+    from shapely.geometry import shape, mapping, MultiPolygon, Polygon
+    from shapely.ops import unary_union
     from shapely.validation import make_valid
     GEOPANDAS_AVAILABLE = True
 except ImportError:
@@ -58,7 +59,7 @@ class PolygonGenerationService:
             mask_array: 2D numpy array (uint8, 0=no flood, 1=flood)
             transform: Affine transform of the raster
             crs_wkt: CRS as WKT/PROJ/EPSG string
-            simplify_tolerance: Douglas-Peucker simplification tolerance (in CRS units)
+            simplify_tolerance: Simplification tolerance (in CRS units)
 
         Returns:
             Dict with: success, geojson, polygon_count, total_area_km2,
@@ -93,19 +94,6 @@ class PolygonGenerationService:
                 mask=binary_mask,
                 transform=transform,
             )
-
-            img_bounds_geom = None
-            try:
-                h_img, w_img = binary_mask.shape
-                minx = transform.c
-                maxy = transform.f
-                maxx = minx + transform.a * w_img
-                miny = maxy + transform.e * h_img
-                from shapely.geometry import box
-                img_bounds_geom = box(min(minx, maxx), min(miny, maxy), max(minx, maxx), max(miny, maxy))
-            except Exception:
-                img_bounds_geom = None
-
             geometries = []
             for geom_dict, value in shapes_gen:
                 if value == 1:
@@ -113,10 +101,6 @@ class PolygonGenerationService:
                     if not geom.is_valid:
                         geom = make_valid(geom)
                     if not geom.is_empty:
-                        # Ignore full-raster bounding box rectangle artifacts (> 95% total area)
-                        if img_bounds_geom and img_bounds_geom.area > 0:
-                            if (geom.area / img_bounds_geom.area) > 0.95:
-                                continue
                         geometries.append(geom)
 
             if not geometries:
@@ -131,46 +115,63 @@ class PolygonGenerationService:
                     "error": None,
                 }
 
-            # 2. Build GeoDataFrame with source CRS (use EPSG:4326 directly for geographic rasters to prevent WKT axis-order swapping)
-            if isinstance(crs_wkt, str) and ("4326" in crs_wkt or "WGS 84" in crs_wkt or "WGS84" in crs_wkt or "GEOGCS" in crs_wkt):
-                gdf = gpd.GeoDataFrame(geometry=geometries, crs="EPSG:4326")
-            else:
-                gdf = gpd.GeoDataFrame(geometry=geometries, crs=crs_wkt if crs_wkt else "EPSG:4326")
+            # 2. Unify all extracted raster geometries topologically into ONE continuous region
+            unified_geom = unary_union(geometries)
+            if not unified_geom.is_valid:
+                unified_geom = make_valid(unified_geom)
 
-            # 3. Compute area in source CRS before reprojection
+            # 3. If MultiPolygon, close small gaps or select the single largest continuous component
+            if isinstance(unified_geom, MultiPolygon):
+                # Try morphological closing to bridge minor gaps
+                merged_geom = unified_geom.buffer(0.002).buffer(-0.002)
+                if isinstance(merged_geom, Polygon) and not merged_geom.is_empty:
+                    unified_geom = merged_geom
+                else:
+                    sub_polys = [
+                        p for p in getattr(merged_geom, 'geoms', getattr(unified_geom, 'geoms', []))
+                        if isinstance(p, Polygon) and not p.is_empty
+                    ]
+                    if sub_polys:
+                        unified_geom = max(sub_polys, key=lambda p: p.area)
+
+            # 4. Apply topology simplification if requested
+            if simplify_tolerance > 0 and not unified_geom.is_empty:
+                simplified_geom = unified_geom.simplify(simplify_tolerance, preserve_topology=True)
+                if isinstance(simplified_geom, Polygon) and not simplified_geom.is_empty:
+                    unified_geom = simplified_geom
+
+            if not unified_geom.is_valid:
+                unified_geom = make_valid(unified_geom)
+
+            # 5. Build GeoDataFrame with single continuous polygon
+            if isinstance(unified_geom, Polygon) and not unified_geom.is_empty:
+                final_geoms = [unified_geom]
+            elif isinstance(unified_geom, MultiPolygon):
+                # Fallback to largest single polygon
+                largest_poly = max(unified_geom.geoms, key=lambda p: p.area)
+                final_geoms = [largest_poly]
+            else:
+                final_geoms = [unified_geom]
+
+            gdf = gpd.GeoDataFrame(geometry=final_geoms, crs=crs_wkt)
+
+            # 7. Compute area in source CRS
             try:
-                # Get a metric projection for area calculation
-                if gdf.crs.is_geographic:
+                if gdf.crs and gdf.crs.is_geographic:
                     metric_crs = gdf.estimate_utm_crs()
                     gdf_metric = gdf.to_crs(metric_crs)
                 else:
                     gdf_metric = gdf
                 total_area_m2 = float(gdf_metric.geometry.area.sum())
             except Exception:
-                # Fallback area estimate from pixel count
-                px_w = abs(transform.a)
-                px_h = abs(transform.e)
                 total_area_m2 = float(np.sum(binary_mask > 0)) * px_w * px_h
 
             total_area_km2 = total_area_m2 / 1_000_000
             total_area_ha = total_area_m2 / 10_000
 
-            # 4. Simplify geometries while preserving topology
-            if simplify_tolerance > 0:
-                gdf["geometry"] = gdf.geometry.simplify(
-                    simplify_tolerance, preserve_topology=True
-                )
-                # Fix any topology issues introduced by simplification
-                gdf["geometry"] = gdf.geometry.apply(
-                    lambda g: make_valid(g) if not g.is_valid else g
-                )
-                gdf = gdf[~gdf.geometry.is_empty]
-
-            # 5. Reproject to WGS84 for Leaflet
-            gdf_wgs84 = gdf.to_crs("EPSG:4326")
-
-            # 6. Convert to GeoJSON
+            # 8. Reproject to WGS84 for Leaflet
             import json
+            gdf_wgs84 = gdf.to_crs("EPSG:4326")
             geojson_str = gdf_wgs84.to_json()
             geojson_dict = json.loads(geojson_str)
 

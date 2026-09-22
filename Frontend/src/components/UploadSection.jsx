@@ -1,13 +1,37 @@
-import React, { useState, useRef } from 'react';
-import { UploadCloud, CheckCircle2, ChevronDown, ChevronUp, RefreshCw, Play } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Database, UploadCloud, CheckCircle2, ChevronDown, ChevronUp, RefreshCw, Play, Sliders } from 'lucide-react';
 
 const METHODS = [
-  { value: 'auto', label: 'Auto (recommended)' },
-  { value: 'differencing', label: 'Differencing + Otsu' },
-  { value: 'ndwi', label: 'NDWI (optical multi-band)' },
+  { value: 'auto', label: 'Auto (Recommended - Multi-Band NDWI / Otsu)' },
+  { value: 'differencing', label: 'Differencing + Otsu (Single Band)' },
+  { value: 'ndwi', label: 'NDWI (Green & NIR Multi-Band Optical)' },
 ];
 
-function FileDropZone({ label, file, onChange, id }) {
+function BaselineSatThumb() {
+  return (
+    <div className="sat-thumb-container">
+      <img
+        src="/pre-flood-thumb.jpg"
+        alt="Pre-Flood Satellite Baseline Observation"
+        className="sat-thumb-img"
+      />
+    </div>
+  );
+}
+
+function EventSatThumb() {
+  return (
+    <div className="sat-thumb-container">
+      <img
+        src="/post-flood-thumb.jpg"
+        alt="Post-Flood Satellite Event Inundation"
+        className="sat-thumb-img"
+      />
+    </div>
+  );
+}
+
+function FileDropZone({ label, file, onChange, id, isEvent }) {
   const inputRef = useRef(null);
 
   const handleClick = () => inputRef.current?.click();
@@ -24,43 +48,51 @@ function FileDropZone({ label, file, onChange, id }) {
   };
 
   return (
-    <div>
-      <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: 5 }}>
+    <div className="ingestion-dropzone-box">
+      <div className="dropzone-header-title font-sans">
         {label}
       </div>
-      <div
-        className={`file-upload-box ${file ? 'has-file' : ''}`}
-        onClick={handleClick}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={handleDrop}
-        tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && handleClick()}
-        role="button"
-        aria-label={`Upload ${label}`}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".tif,.tiff"
-          onChange={(e) => e.target.files[0] && onChange(e.target.files[0])}
-          style={{ display: 'none' }}
-          id={id}
-        />
-        {file ? (
-          <>
-            <CheckCircle2 size={24} color="#10b981" className="upload-icon" />
-            <div className="file-upload-name">{file.name}</div>
-            <div className="file-upload-size">{formatSize(file.size)}</div>
-          </>
-        ) : (
-          <>
-            <UploadCloud size={24} color="#38bdf8" className="upload-icon" />
-            <div className="file-upload-label">Click or drag GeoTIFF here</div>
-            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: 3 }}>
-              .tif / .tiff · Georeferenced required
+
+      <div className="dropzone-card-content">
+        {/* Left Side Satellite Thumbnail Preview */}
+        {isEvent ? <EventSatThumb /> : <BaselineSatThumb />}
+
+        {/* Right Side Dashed Drag and Drop Container */}
+        <div
+          className={`file-upload-box-enhanced ${file ? 'has-file' : ''}`}
+          onClick={handleClick}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
+          tabIndex={0}
+          onKeyDown={(e) => e.key === 'Enter' && handleClick()}
+          role="button"
+          aria-label={`Upload ${label}`}
+        >
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".tif,.tiff"
+            onChange={(e) => e.target.files[0] && onChange(e.target.files[0])}
+            style={{ display: 'none' }}
+            id={id}
+          />
+
+          {file ? (
+            <div className="file-selected-info">
+              <CheckCircle2 size={24} color="#10b981" />
+              <div className="file-upload-name font-mono">{file.name}</div>
+              <div className="file-upload-size font-mono">{formatSize(file.size)}</div>
             </div>
-          </>
-        )}
+          ) : (
+            <div className="file-prompt-info">
+              <UploadCloud size={24} color="#38bdf8" className="upload-cloud-icon" />
+              <div className="file-upload-label font-sans">Click or drag GeoTIFF here</div>
+              <div className="file-upload-subtext font-mono">
+                .tif / .tiff - Georeferenced required
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -87,97 +119,116 @@ export default function UploadSection({ onRunAnalysis, isRunning }) {
   };
 
   return (
-    <div className="card">
-      <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <UploadCloud size={16} color="#38bdf8" />
-        <span>Image Ingestion & Analysis</span>
+    <div className="ingestion-section-wrapper">
+      {/* Section Header */}
+      <div className="ingestion-header-row">
+        <div className="ingestion-title-block">
+          <div className="title-icon-box">
+            <Database size={20} color="#38bdf8" />
+          </div>
+          <div>
+            <h3 className="ingestion-card-title font-sans">IMAGE INGESTION & ANALYSIS</h3>
+            <p className="ingestion-card-subtitle font-mono">Upload pre- and post-flood satellite imagery to run the analysis</p>
+          </div>
+        </div>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Pre/Post Sub-Panel Containers Grid */}
+      <div className="ingestion-dropzones-grid">
         <FileDropZone
           label="Pre-Flood Image (Baseline)"
           file={preFile}
           onChange={setPreFile}
           id="pre-upload"
+          isEvent={false}
         />
         <FileDropZone
           label="Post-Flood Image (Event)"
           file={postFile}
           onChange={setPostFile}
           id="post-upload"
+          isEvent={true}
         />
       </div>
 
-      {/* Options toggle */}
-      <button className="options-toggle" onClick={() => setShowOptions((v) => !v)}>
-        <span>Detection Options</span>
-        {showOptions ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-      </button>
-
-      {showOptions && (
-        <div className="options-body">
-          <div className="form-group">
-            <label>Detection Method</label>
-            <select value={method} onChange={(e) => setMethod(e.target.value)}>
-              {METHODS.map((m) => (
-                <option key={m.value} value={m.value}>{m.label}</option>
-              ))}
-            </select>
+      {/* Detection Options Accordion Header Bar */}
+      <div className="detection-options-container">
+        <button className="options-toggle-btn" onClick={() => setShowOptions((v) => !v)}>
+          <div className="toggle-left">
+            <Sliders size={15} color="#38bdf8" />
+            <span className="font-sans">Detection Options</span>
           </div>
+          {showOptions ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+        </button>
 
-          <div className="form-group">
-            <label>Morphology Cleanup Iterations: {morphIters}</label>
-            <div className="range-row">
+        {showOptions && (
+          <div className="options-body-grid">
+            <div className="form-group">
+              <label className="font-mono">Detection Method</label>
+              <select value={method} onChange={(e) => setMethod(e.target.value)} className="font-sans">
+                {METHODS.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="font-mono">Morphology Cleanup Iterations: {morphIters}</label>
+              <div className="range-row">
+                <input
+                  type="range"
+                  min={0}
+                  max={5}
+                  value={morphIters}
+                  onChange={(e) => setMorphIters(Number(e.target.value))}
+                />
+                <span className="range-val font-mono">{morphIters}</span>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="font-mono">Polygon Simplification Tolerance</label>
               <input
-                type="range"
-                min={0}
-                max={5}
-                value={morphIters}
-                onChange={(e) => setMorphIters(Number(e.target.value))}
+                type="number"
+                step="0.00001"
+                min="0"
+                value={simplifyTol}
+                onChange={(e) => setSimplifyTol(e.target.value)}
+                className="font-mono"
               />
-              <span className="range-val">{morphIters}</span>
             </div>
           </div>
+        )}
+      </div>
 
-          <div className="form-group">
-            <label>Polygon Simplification Tolerance</label>
-            <input
-              type="number"
-              step="0.00001"
-              min="0"
-              value={simplifyTol}
-              onChange={(e) => setSimplifyTol(e.target.value)}
-            />
-          </div>
-        </div>
-      )}
-
-      <div style={{ marginTop: 12 }}>
+      {/* Primary Action Button */}
+      <div className="ingestion-action-footer">
         <button
-          className="btn-primary"
+          className="btn-primary-ingestion"
           onClick={handleRun}
           disabled={!canRun}
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
         >
           {isRunning ? (
             <>
-              <RefreshCw size={15} className="spin-icon" />
-              Running Analysis…
+              <RefreshCw size={16} className="spin-icon" />
+              <span>Running Flood Analysis…</span>
             </>
           ) : (
             <>
-              <Play size={15} />
-              Run Flood Analysis
+              <Play size={16} />
+              <span>Run Flood Analysis</span>
             </>
           )}
         </button>
 
         {(!preFile || !postFile) && (
-          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: 6 }}>
-            Upload both images to enable analysis
+          <div className="ingestion-disabled-hint font-mono">
+            Upload both images to enable analysis.
           </div>
         )}
       </div>
     </div>
   );
 }
+
+

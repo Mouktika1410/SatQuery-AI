@@ -28,52 +28,89 @@ def generate_scenario(base_data_dir: str = "data") -> None:
 
     print(f"Generating synthetic scenario datasets into '{base_data_dir}'...")
 
-    # 1. Generate Village Boundaries GeoJSON with natural curvilinear polygons
-    villages_geojson = {
+    # 1. Generate Village Boundaries GeoJSON (Analytical closed polygons for GIS calculations)
+    villages_analytical_geojson = {
         "type": "FeatureCollection",
         "features": [
             {
                 "type": "Feature",
-                "properties": {"name": "Navapur Village", "population": 4200, "zone": "North"},
+                "properties": {"name": "Navapur Village", "population": 4200, "zone": "North-West"},
                 "geometry": {
                     "type": "Polygon",
                     "coordinates": [[
-                        [72.822, 19.025], [72.845, 19.018], [72.875, 19.032], [72.895, 19.055],
-                        [72.885, 19.078], [72.855, 19.082], [72.830, 19.065], [72.822, 19.025]
+                        [72.840, 19.018], [72.892, 19.018], [72.892, 19.058], [72.840, 19.058], [72.840, 19.018]
                     ]]
                 }
             },
             {
                 "type": "Feature",
-                "properties": {"name": "Kalyanpur Settlement", "population": 6800, "zone": "Central"},
+                "properties": {"name": "Shivaji Nagar", "population": 3100, "zone": "North-East"},
                 "geometry": {
                     "type": "Polygon",
                     "coordinates": [[
-                        [72.882, 18.945], [72.915, 18.940], [72.955, 18.955], [72.962, 18.988],
-                        [72.945, 19.015], [72.910, 19.018], [72.885, 18.985], [72.882, 18.945]
+                        [72.892, 19.018], [72.942, 19.018], [72.942, 19.055], [72.892, 19.055], [72.892, 19.018]
                     ]]
                 }
             },
             {
                 "type": "Feature",
-                "properties": {"name": "Shivaji Nagar", "population": 3100, "zone": "East"},
+                "properties": {"name": "Kalyanpur Settlement", "population": 6800, "zone": "South-Central"},
                 "geometry": {
                     "type": "Polygon",
                     "coordinates": [[
-                        [72.922, 19.022], [72.948, 19.018], [72.978, 19.035], [72.985, 19.062],
-                        [72.965, 19.082], [72.935, 19.075], [72.920, 19.050], [72.922, 19.022]
+                        [72.882, 18.960], [72.942, 18.960], [72.942, 19.018], [72.882, 19.018], [72.882, 18.960]
                     ]]
                 }
             }
         ]
     }
     with open(os.path.join(base_data_dir, "boundaries", "villages.geojson"), "w") as f:
-        json.dump(villages_geojson, f, indent=2)
-    print(" - Created data/boundaries/villages.geojson")
+        json.dump(villages_analytical_geojson, f, indent=2)
+    print(" - Created data/boundaries/villages.geojson (analytical closed polygons)")
+
+    # Visual village boundary overlay GeoJSON (Open dashed reference lines for map display)
+    villages_visual_geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"name": "Navapur Village", "population": 4200, "zone": "North-West"},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [
+                        [72.840, 19.018], [72.892, 19.018], [72.892, 19.058]
+                    ]
+                }
+            },
+            {
+                "type": "Feature",
+                "properties": {"name": "Shivaji Nagar", "population": 3100, "zone": "North-East"},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [
+                        [72.892, 19.018], [72.942, 19.018], [72.942, 19.055]
+                    ]
+                }
+            },
+            {
+                "type": "Feature",
+                "properties": {"name": "Kalyanpur Settlement", "population": 6800, "zone": "South-Central"},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [
+                        [72.882, 19.018], [72.882, 18.960], [72.942, 18.960], [72.942, 19.018]
+                    ]
+                }
+            }
+        ]
+    }
+    with open(os.path.join(base_data_dir, "boundaries", "villages_visual.geojson"), "w") as f:
+        json.dump(villages_visual_geojson, f, indent=2)
+    print(" - Created data/boundaries/villages_visual.geojson (open dashed reference overlay)")
 
     # 2. Generate Population GeoJSON
     with open(os.path.join(base_data_dir, "population", "population.geojson"), "w") as f:
-        json.dump(villages_geojson, f, indent=2)
+        json.dump(villages_analytical_geojson, f, indent=2)
     print(" - Created data/population/population.geojson")
 
     # 3. Generate Building Footprints GeoJSON
@@ -97,7 +134,7 @@ def generate_scenario(base_data_dir: str = "data") -> None:
         json.dump({"type": "FeatureCollection", "features": buildings_features}, f, indent=2)
     print(f" - Created data/buildings/buildings.geojson ({len(buildings_features)} footprints)")
 
-    # 4. Generate Road Network GeoJSON
+    # 4. Generate Road Network GeoJSON (Exact 2 road corridors matching 2nd reference image)
     roads_geojson = {
         "type": "FeatureCollection",
         "features": [
@@ -162,11 +199,10 @@ def generate_scenario(base_data_dir: str = "data") -> None:
         import rasterio
         from rasterio.transform import from_bounds
         from rasterio.crs import CRS
+        from rasterio.enums import ColorInterp
 
         transform = from_bounds(MIN_LON, MIN_LAT, MAX_LON, MAX_LAT, WIDTH, HEIGHT)
         crs = CRS.from_epsg(4326)
-
-        np.random.seed(42)
 
         np.random.seed(42)
 
@@ -174,11 +210,11 @@ def generate_scenario(base_data_dir: str = "data") -> None:
         norm_x = grid_x / float(WIDTH - 1)
         norm_y = grid_y / float(HEIGHT - 1)
 
-        # 1. Central centroid of the main inundation region (matching reference image media_1789711688278.png)
+        # Central centroid of the main inundation region (matching reference image)
         cx, cy = 0.50, 0.48
         r_dist = np.sqrt((norm_x - cx)**2 + (norm_y - cy)**2)
 
-        # 2. Multi-scale smooth Gaussian Random Field (uneven lobes, branching extensions & micro-edges)
+        # Multi-scale smooth Gaussian Random Field (uneven lobes, branching extensions & micro-edges)
         r1 = np.random.randn(HEIGHT, WIDTH)
         r2 = np.random.randn(HEIGHT, WIDTH)
         r3 = np.random.randn(HEIGHT, WIDTH)
@@ -195,18 +231,27 @@ def generate_scenario(base_data_dir: str = "data") -> None:
         n_min, n_max = noise_field.min(), noise_field.max()
         noise_norm = (noise_field - n_min) / (n_max - n_min + 1e-10)
 
-        # 3. Dynamic Organic Inundation Radius Field (produces exact 172.90 km² flood footprint)
+        # Dynamic Organic Coastal Bay Inundation Radius Field (matching exact reference silhouette)
         organic_radius = 0.22 + 0.22 * noise_norm
 
-        # Baseline narrow water feature (small central river channel)
-        channel_mask = r_dist < 0.025
+        # Single dominant, broad, continuous, organic flood region matching reference silhouette
+        raw_flood_mask = r_dist < organic_radius
+        raw_flood_mask[0, :] = False
+        raw_flood_mask[-1, :] = False
+        raw_flood_mask[:, 0] = False
+        raw_flood_mask[:, -1] = False
 
-        # Single dominant, broad, continuous, organic flood region
-        flood_mask = r_dist < organic_radius
-        flood_mask[0, :] = False
-        flood_mask[-1, :] = False
-        flood_mask[:, 0] = False
-        flood_mask[:, -1] = False
+        # Fill internal holes to guarantee 0 holes
+        clean_flood_mask = ndi.binary_fill_holes(raw_flood_mask)
+
+        # Retain single largest connected component (guarantees 0 disconnected fragments)
+        lbl, num = ndi.label(clean_flood_mask)
+        if num > 1:
+            sizes = ndi.sum(clean_flood_mask, lbl, range(1, num + 1))
+            largest_label = np.argmax(sizes) + 1
+            flood_mask = (lbl == largest_label)
+        else:
+            flood_mask = clean_flood_mask
 
         dem_data = (10.0 + 65.0 * r_dist - 15.0 * noise_norm).astype(np.float32)
 
@@ -218,30 +263,38 @@ def generate_scenario(base_data_dir: str = "data") -> None:
             dst.write(dem_data, 1)
         print(" - Created data/dem/dem_elevation.tif")
 
-        # Synthetic Sentinel Multi-band: Band 1=Blue, Band 2=Green, Band 3=Red, Band 4=NIR
-        pre_raster = np.full((4, HEIGHT, WIDTH), 80.0, dtype=np.float32)
-        pre_raster[1, channel_mask] = 130.0  # Green
-        pre_raster[3, channel_mask] = 15.0   # Low NIR for water
+        # Synthetic Sentinel Multi-band (uint8 RGB + NIR for Windows Explorer thumbnail compatibility)
+        # Band 1=Red, Band 2=Green, Band 3=Blue, Band 4=NIR
+        pre_raster = np.zeros((4, HEIGHT, WIDTH), dtype=np.uint8)
+        pre_raster[0] = 70   # Red
+        pre_raster[1] = 110  # Green
+        pre_raster[2] = 65   # Blue
+        pre_raster[3] = 180  # NIR
 
         pre_path = os.path.join(base_data_dir, "input", "sample_pre_flood_sentinel.tif")
         with rasterio.open(
             pre_path, "w", driver="GTiff", height=HEIGHT, width=WIDTH,
-            count=4, dtype=rasterio.float32, crs=crs, transform=transform
+            count=4, dtype=rasterio.uint8, crs=crs, transform=transform,
+            photometric="RGB"
         ) as dst:
+            dst.colorinterp = [ColorInterp.red, ColorInterp.green, ColorInterp.blue, ColorInterp.nir]
             dst.write(pre_raster)
         print(" - Created data/input/sample_pre_flood_sentinel.tif")
 
-        # Post-flood multi-band raster: organic flood plume along river valley
+        # Post-flood: organic flood plume matching reference image
         post_raster = np.copy(pre_raster)
-        post_raster[1, flood_mask] = 150.0  # Green
-        post_raster[3, flood_mask] = 10.0   # Low NIR -> positive NDWI
-        post_raster[0, flood_mask] = 220.0  # Single-band differencing signal
+        post_raster[0, flood_mask] = 30   # Red
+        post_raster[1, flood_mask] = 80   # Green
+        post_raster[2, flood_mask] = 180  # High Blue
+        post_raster[3, flood_mask] = 10   # Low NIR -> strong water NDWI signature
 
         post_path = os.path.join(base_data_dir, "input", "sample_post_flood_sentinel.tif")
         with rasterio.open(
             post_path, "w", driver="GTiff", height=HEIGHT, width=WIDTH,
-            count=4, dtype=rasterio.float32, crs=crs, transform=transform
+            count=4, dtype=rasterio.uint8, crs=crs, transform=transform,
+            photometric="RGB"
         ) as dst:
+            dst.colorinterp = [ColorInterp.red, ColorInterp.green, ColorInterp.blue, ColorInterp.nir]
             dst.write(post_raster)
         print(" - Created data/input/sample_post_flood_sentinel.tif")
 
