@@ -24,6 +24,7 @@ from app.schemas.flood import (
     ImageValidationResult,
     FloodDetectionResult,
     FloodPolygonResult,
+    ImageStudyResult,
     ImpactMetrics,
     AffectedVillage,
     PriorityScore,
@@ -163,6 +164,114 @@ async def detect_flood(
     _cleanup_files(pre_path, post_path)
 
     return FloodDetectionResult(**{k: v for k, v in result.items() if k in FloodDetectionResult.model_fields})
+
+
+@router.post(
+    "/detect/gee",
+    response_model=FloodDetectionResult,
+    summary="Detect real flood extent using Google Earth Engine Sentinel-1 GRD imagery",
+)
+async def detect_flood_gee(
+    pre_start: str = Form("2019-10-15"),
+    pre_end: str = Form("2019-11-04"),
+    post_start: str = Form("2019-11-05"),
+    post_end: str = Form("2019-11-15"),
+    min_lon: float = Form(-1.25),
+    min_lat: float = Form(53.50),
+    max_lon: float = Form(-0.90),
+    max_lat: float = Form(53.65),
+    threshold_db: float = Form(-2.0),
+    polarization: str = Form("VV"),
+    pass_direction: str = Form("ASCENDING"),
+) -> FloodDetectionResult:
+    """
+    Run real GEE Sentinel-1 SAR change detection for South Yorkshire / River Don (or custom AOI).
+    Stores real flood mask and GeoJSON in session cache for downstream steps.
+    """
+    from app.services.gee_flood_detection import GEEFloodDetectionService
+
+    session_id = uuid.uuid4().hex
+    bbox = [min_lon, min_lat, max_lon, max_lat]
+
+    gee_svc = GEEFloodDetectionService()
+    result = gee_svc.detect_flood_sentinel1(
+        bbox=bbox,
+        pre_start=pre_start,
+        pre_end=pre_end,
+        post_start=post_start,
+        post_end=post_end,
+        threshold_db=threshold_db,
+        polarization=polarization,
+        pass_direction=pass_direction,
+    )
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"GEE Sentinel-1 flood detection failed: {result.get('error')}",
+        )
+
+    geojson = result.get("geojson")
+    _session_cache[session_id] = {
+        "flood_geojson": geojson,
+        "detection_result": result,
+        "crs_wkt": "EPSG:4326",
+    }
+
+    return FloodDetectionResult(**{k: v for k, v in result.items() if k in FloodDetectionResult.model_fields})
+
+
+@router.post(
+    "/image-study",
+    response_model=ImageStudyResult,
+    summary="Run Flood Image Study on dual georeferenced GeoTIFF rasters",
+)
+async def run_image_study(
+    background_tasks: BackgroundTasks,
+    pre_flood: UploadFile = File(..., description="Pre-flood georeferenced GeoTIFF image"),
+    post_flood: UploadFile = File(..., description="Post-flood georeferenced GeoTIFF image"),
+    method: str = Form("auto"),
+) -> ImageStudyResult:
+    """
+    Run flood change detection and centroid calculation on two uploaded GeoTIFF rasters.
+    Validates CRS/geotransform and rejects non-georeferenced images.
+    Returns georeferenced flood GeoJSON, polygon count, flood area, and centroid coordinates.
+    """
+    from app.services.image_study import ImageStudyService
+
+    session_id = uuid.uuid4().hex
+    tmpdir = tempfile.mkdtemp(prefix="satquery_imagestudy_")
+    pre_path = _save_temp(pre_flood, f"_pre_{session_id}.tif", tmpdir)
+    post_path = _save_temp(post_flood, f"_post_{session_id}.tif", tmpdir)
+    background_tasks.add_task(_cleanup_files, pre_path, post_path)
+
+    try:
+        svc = ImageStudyService()
+        result = svc.analyze_pair(pre_path, post_path, options={"method": method})
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Image Study processing failed: {exc}",
+        )
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result.get("error", "Image Study analysis failed."),
+        )
+
+    result["session_id"] = session_id
+    _session_cache[session_id] = {
+        "flood_geojson": result.get("geojson"),
+        "image_study_result": result,
+    }
+
+    return ImageStudyResult(**{k: v for k, v in result.items() if k in ImageStudyResult.model_fields})
 
 
 # ---------------------------------------------------------------------------

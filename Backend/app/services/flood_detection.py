@@ -48,6 +48,38 @@ class FloodDetectionService:
       - Band differencing + Otsu thresholding for single-band/SAR
     """
 
+    def detect_gee(
+        self,
+        bbox: Optional[List[float]] = None,
+        pre_start: str = "2019-10-15",
+        pre_end: str = "2019-11-04",
+        post_start: str = "2019-11-05",
+        post_end: str = "2019-11-15",
+        threshold_db: float = -2.0,
+        smoothing_radius: int = 50,
+        polarization: str = "VV",
+        pass_direction: str = "ASCENDING",
+        simplify_tolerance: float = 0.0001,
+    ) -> Dict[str, Any]:
+        """
+        Run real Google Earth Engine Sentinel-1 GRD flood detection for South Yorkshire / River Don
+        or a user-specified AOI and historical date range.
+        """
+        from app.services.gee_flood_detection import GEEFloodDetectionService
+        gee_svc = GEEFloodDetectionService()
+        return gee_svc.detect_flood_sentinel1(
+            bbox=bbox,
+            pre_start=pre_start,
+            pre_end=pre_end,
+            post_start=post_start,
+            post_end=post_end,
+            threshold_db=threshold_db,
+            smoothing_radius=smoothing_radius,
+            polarization=polarization,
+            pass_direction=pass_direction,
+            simplify_tolerance=simplify_tolerance,
+        )
+
     def detect(
         self,
         pre_path: str,
@@ -55,19 +87,33 @@ class FloodDetectionService:
         options: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Run flood detection pipeline on a pre/post image pair.
+        Run flood detection pipeline on a pre/post image pair or GEE.
 
         Returns a result dict containing:
           success, method_used, flooded_pixels, total_pixels, flood_percentage,
           flood_area_km2, bounds, mask_array (numpy), mask_path, crs, notes, error
         """
+        opts = options or {}
+        method = opts.get("method", "auto")
+
+        if method == "gee":
+            return self.detect_gee(
+                bbox=opts.get("bbox"),
+                pre_start=opts.get("pre_start", "2019-10-15"),
+                pre_end=opts.get("pre_end", "2019-11-04"),
+                post_start=opts.get("post_start", "2019-11-05"),
+                post_end=opts.get("post_end", "2019-11-15"),
+                threshold_db=float(opts.get("threshold_db", -2.0)),
+                smoothing_radius=int(opts.get("smoothing_radius", 50)),
+                polarization=opts.get("polarization", "VV"),
+                pass_direction=opts.get("pass_direction", "ASCENDING"),
+            )
+
         if not RASTERIO_AVAILABLE:
             return self._error_result("rasterio is not installed. Run: pip install rasterio")
         if not NUMPY_AVAILABLE:
             return self._error_result("numpy is not installed. Run: pip install numpy")
 
-        opts = options or {}
-        method = opts.get("method", "auto")
         morphology_iters = int(opts.get("morphology_iterations", 2))
 
         notes: List[str] = []

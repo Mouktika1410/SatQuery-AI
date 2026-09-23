@@ -42,6 +42,27 @@ export async function runFullPipeline(preFile, postFile, options = {}) {
 }
 
 /**
+ * Run dual-GeoTIFF Image Study flood change detection and centroid analysis.
+ */
+export async function runImageStudy(preFile, postFile) {
+  const formData = new FormData();
+  formData.append('pre_flood', preFile);
+  formData.append('post_flood', postFile);
+  formData.append('method', 'auto');
+
+  const res = await fetch(`${BASE_URL}/flood/image-study`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ detail: res.statusText }));
+    const detail = typeof errorData.detail === 'string' ? errorData.detail : JSON.stringify(errorData.detail);
+    throw new Error(detail || 'Image Study analysis failed.');
+  }
+  return res.json();
+}
+
+/**
  * Send a natural-language question to the AI assistant.
  */
 export async function sendChatQuery(question, sessionId = null, context = null) {

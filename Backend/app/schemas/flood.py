@@ -75,6 +75,7 @@ class FloodDetectionResult(BaseModel):
     mask_path: Optional[str] = None
     crs: Optional[str] = None
     notes: List[str] = Field(default_factory=list)
+    acquisition_metadata: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
 
@@ -91,6 +92,62 @@ class FloodPolygonResult(BaseModel):
     total_area_ha: float = 0.0
     crs: str = "EPSG:4326"
     simplification_tolerance: float = 0.0001
+    error: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Image Study Schemas
+# ---------------------------------------------------------------------------
+
+class RasterMetadata(BaseModel):
+    """Metadata extracted from a georeferenced satellite GeoTIFF raster."""
+    filename: str
+    width: int
+    height: int
+    band_count: int
+    crs: str
+    bounds: Dict[str, float]  # left, bottom, right, top
+    pixel_size_x: float
+    pixel_size_y: float
+
+
+class CentroidCoordinates(BaseModel):
+    """Geographic centroid coordinates of detected flood polygons."""
+    latitude: float
+    longitude: float
+
+
+class ImageStudyResult(BaseModel):
+    """Results from dual-GeoTIFF Image Study flood analysis."""
+    success: bool
+    session_id: Optional[str] = None
+    pre_metadata: Optional[RasterMetadata] = None
+    post_metadata: Optional[RasterMetadata] = None
+    flood_area_km2: float = 0.0
+    flood_area_ha: float = 0.0
+    polygon_count: int = 0
+    centroid: Optional[CentroidCoordinates] = None
+    geojson: Optional[Dict[str, Any]] = None
+    exposed_population: Optional[int] = Field(
+        default=None, description="Modeled estimate of population in flood polygon"
+    )
+    population_geojson: Optional[Dict[str, Any]] = Field(
+        default=None, description="GeoJSON feature collection of population grid cells"
+    )
+    affected_buildings: Optional[int] = Field(
+        default=None, description="Count of building footprints intersecting flood extent"
+    )
+    buildings_geojson: Optional[Dict[str, Any]] = Field(
+        default=None, description="GeoJSON feature collection of building footprints"
+    )
+    affected_road_length_km: Optional[float] = Field(
+        default=None, description="Total length in km of inundated road segments"
+    )
+    affected_roads_geojson: Optional[Dict[str, Any]] = Field(
+        default=None, description="GeoJSON feature collection of inundated road segments"
+    )
+    bounds: Optional[Dict[str, float]] = None
+    notes: List[str] = Field(default_factory=list)
     error: Optional[str] = None
 
 

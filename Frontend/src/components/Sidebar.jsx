@@ -1,8 +1,9 @@
 import React from 'react';
-import { Home, Map, BarChart2, ShieldAlert, Upload, Bot, Satellite } from 'lucide-react';
+import { Home, Map, BarChart2, ShieldAlert, Upload, Bot, Satellite, Compass } from 'lucide-react';
 
 const NAV_ITEMS = [
   { id: 'home', icon: Home, label: 'Home' },
+  { id: 'image_study', icon: Compass, label: 'Image Study' },
   { id: 'map', icon: Map, label: 'Map Explorer' },
   { id: 'impact', icon: BarChart2, label: 'Impact Analysis' },
   { id: 'evacuation', icon: ShieldAlert, label: 'Evacuation Sites' },

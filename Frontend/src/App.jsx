@@ -8,7 +8,9 @@ import StatusIndicator from './components/StatusIndicator';
 import MetricsPanel from './components/MetricsPanel';
 import MapViewer from './components/MapViewer';
 import AiAssistant from './components/AiAssistant';
-import { runFullPipeline } from './services/api';
+import ImageStudyUpload from './components/ImageStudyUpload';
+import ImageStudyResult from './components/ImageStudyResult';
+import { runFullPipeline, runImageStudy } from './services/api';
 import {
   BarChart2,
   Upload,
@@ -35,6 +37,9 @@ export default function App() {
   const [pipelineResult, setPipelineResult] = useState(null);
   const [error, setError] = useState(null);
 
+  const [imageStudyResult, setImageStudyResult] = useState(null);
+  const [imageStudyState, setImageStudyState] = useState('idle');
+
   const [uploadedFiles, setUploadedFiles] = useState({ pre: null, post: null });
   const [selectedFeature, setSelectedFeature] = useState(null);
 
@@ -58,6 +63,25 @@ export default function App() {
     } catch (err) {
       const msg = err.message || 'Analysis failed. Check the backend is running.';
       setError(msg);
+      setAnalysisState('error');
+    }
+  }, []);
+
+  const handleRunImageStudy = useCallback(async (preFile, postFile) => {
+    setImageStudyState('running');
+    setAnalysisState('running');
+    setError(null);
+
+    try {
+      const result = await runImageStudy(preFile, postFile);
+      setImageStudyResult(result);
+      setImageStudyState('complete');
+      setAnalysisState('complete');
+      setActiveTab('image_study_result');
+    } catch (err) {
+      const msg = err.message || 'Image Study analysis failed.';
+      setError(msg);
+      setImageStudyState('error');
       setAnalysisState('error');
     }
   }, []);
@@ -136,6 +160,26 @@ export default function App() {
         />
 
         <main className="workspace-main">
+          {/* TAB 0A: FLOOD IMAGE STUDY (Upload) */}
+          {activeTab === 'image_study' && (
+            <div className="upload-view-container">
+              <ImageStudyUpload
+                onRunImageStudy={handleRunImageStudy}
+                isRunning={imageStudyState === 'running'}
+              />
+            </div>
+          )}
+
+          {/* TAB 0B: FLOOD ANALYSIS RESULT (Image Study Map View) */}
+          {activeTab === 'image_study_result' && (
+            <div className="upload-view-container">
+              <ImageStudyResult
+                result={imageStudyResult}
+                onBackToUpload={() => setActiveTab('image_study')}
+              />
+            </div>
+          )}
+
           {/* TAB 1: MAP EXPLORER (Hero Full View) */}
           {activeTab === 'map' && (
             <div className="map-view-hero">

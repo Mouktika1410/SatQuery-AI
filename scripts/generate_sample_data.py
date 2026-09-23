@@ -64,9 +64,13 @@ def generate_scenario(base_data_dir: str = "data") -> None:
             }
         ]
     }
-    with open(os.path.join(base_data_dir, "boundaries", "villages.geojson"), "w") as f:
-        json.dump(villages_analytical_geojson, f, indent=2)
-    print(" - Created data/boundaries/villages.geojson (analytical closed polygons)")
+    villages_file = os.path.join(base_data_dir, "boundaries", "villages.geojson")
+    if not (os.path.exists(villages_file) and os.path.getsize(villages_file) > 500):
+        with open(villages_file, "w") as f:
+            json.dump(villages_analytical_geojson, f, indent=2)
+        print(" - Created data/boundaries/villages.geojson (analytical closed polygons)")
+    else:
+        print(" - Preserved real data/boundaries/villages.geojson")
 
     # Visual village boundary overlay GeoJSON (Open dashed reference lines for map display)
     villages_visual_geojson = {
@@ -108,61 +112,103 @@ def generate_scenario(base_data_dir: str = "data") -> None:
         json.dump(villages_visual_geojson, f, indent=2)
     print(" - Created data/boundaries/villages_visual.geojson (open dashed reference overlay)")
 
-    # 2. Generate Population GeoJSON
-    with open(os.path.join(base_data_dir, "population", "population.geojson"), "w") as f:
-        json.dump(villages_analytical_geojson, f, indent=2)
-    print(" - Created data/population/population.geojson")
+    # 2. Generate Population GeoJSON (preserve real population dataset if present)
+    pop_file = os.path.join(base_data_dir, "population", "population.geojson")
+    should_write_pop = True
+    if os.path.exists(pop_file):
+        try:
+            with open(pop_file, "r") as pf:
+                existing_pop = json.load(pf)
+                if len(existing_pop.get("features", [])) > 10:
+                    should_write_pop = False
+        except Exception:
+            pass
 
-    # 3. Generate Building Footprints GeoJSON
-    buildings_features = []
-    np.random.seed(42)
-    for i in range(40):
-        bx = np.random.uniform(72.84, 72.96)
-        by = np.random.uniform(18.94, 19.06)
-        size = 0.002
-        buildings_features.append({
-            "type": "Feature",
-            "properties": {"building_id": f"BLD_{i+1:03d}", "type": "residential"},
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[
-                    [bx, by], [bx + size, by], [bx + size, by + size], [bx, by + size], [bx, by]
-                ]]
-            }
-        })
-    with open(os.path.join(base_data_dir, "buildings", "buildings.geojson"), "w") as f:
-        json.dump({"type": "FeatureCollection", "features": buildings_features}, f, indent=2)
-    print(f" - Created data/buildings/buildings.geojson ({len(buildings_features)} footprints)")
+    if should_write_pop:
+        with open(pop_file, "w") as f:
+            json.dump(villages_analytical_geojson, f, indent=2)
+        print(" - Created data/population/population.geojson")
+    else:
+        print(" - Preserved real data/population/population.geojson")
 
-    # 4. Generate Road Network GeoJSON (Exact 2 road corridors matching 2nd reference image)
-    roads_geojson = {
-        "type": "FeatureCollection",
-        "features": [
-            {
+    # 3. Generate Building Footprints GeoJSON (preserve real building dataset if present)
+    bld_file = os.path.join(base_data_dir, "buildings", "buildings.geojson")
+    should_write_bld = True
+    if os.path.exists(bld_file):
+        try:
+            with open(bld_file, "r") as bf:
+                existing_bld = json.load(bf)
+                if len(existing_bld.get("features", [])) > 100:
+                    should_write_bld = False
+        except Exception:
+            pass
+
+    if should_write_bld:
+        buildings_features = []
+        np.random.seed(42)
+        for i in range(40):
+            bx = np.random.uniform(72.84, 72.96)
+            by = np.random.uniform(18.94, 19.06)
+            size = 0.002
+            buildings_features.append({
                 "type": "Feature",
-                "properties": {"name": "National Highway 48 Bypass", "highway": "primary"},
+                "properties": {"building_id": f"BLD_{i+1:03d}", "type": "residential"},
                 "geometry": {
-                    "type": "LineString",
-                    "coordinates": [
-                        [72.81, 18.92], [72.86, 18.97], [72.91, 19.02], [72.97, 19.07]
-                    ]
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [bx, by], [bx + size, by], [bx + size, by + size], [bx, by + size], [bx, by]
+                    ]]
                 }
-            },
-            {
-                "type": "Feature",
-                "properties": {"name": "River Coastal Link Road", "highway": "secondary"},
-                "geometry": {
-                    "type": "LineString",
-                    "coordinates": [
-                        [72.84, 19.07], [72.88, 19.01], [72.93, 18.96], [72.98, 18.93]
-                    ]
+            })
+        with open(bld_file, "w") as f:
+            json.dump({"type": "FeatureCollection", "features": buildings_features}, f, indent=2)
+        print(f" - Created data/buildings/buildings.geojson ({len(buildings_features)} footprints)")
+    else:
+        print(" - Preserved real data/buildings/buildings.geojson")
+
+    # 4. Generate Road Network GeoJSON (preserve real road dataset if present)
+    roads_file = os.path.join(base_data_dir, "roads", "roads.geojson")
+    should_write_roads = True
+    if os.path.exists(roads_file):
+        try:
+            with open(roads_file, "r") as rf:
+                existing_roads = json.load(rf)
+                if len(existing_roads.get("features", [])) > 10:
+                    should_write_roads = False
+        except Exception:
+            pass
+
+    if should_write_roads:
+        roads_geojson = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {"name": "National Highway 48 Bypass", "highway": "primary"},
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [
+                            [72.81, 18.92], [72.86, 18.97], [72.91, 19.02], [72.97, 19.07]
+                        ]
+                    }
+                },
+                {
+                    "type": "Feature",
+                    "properties": {"name": "River Coastal Link Road", "highway": "secondary"},
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": [
+                            [72.84, 19.07], [72.88, 19.01], [72.93, 18.96], [72.98, 18.93]
+                        ]
+                    }
                 }
-            }
-        ]
-    }
-    with open(os.path.join(base_data_dir, "roads", "roads.geojson"), "w") as f:
-        json.dump(roads_geojson, f, indent=2)
-    print(" - Created data/roads/roads.geojson")
+            ]
+        }
+        with open(roads_file, "w") as f:
+            json.dump(roads_geojson, f, indent=2)
+        print(" - Created data/roads/roads.geojson")
+    else:
+        print(" - Preserved real data/roads/roads.geojson")
 
     # 5. Generate POIs / Candidate Evacuation Facilities
     pois_geojson = {
