@@ -17,6 +17,18 @@ from app.schemas.flood import (
     PipelineResult,
 )
 from app.schemas.chat import ChatQuery, ChatResponse
+from app.schemas.copernicus import (
+    AOIBounds,
+    Sentinel1ProductSummary,
+    CopernicusSearchRequest,
+    CopernicusSearchResponse,
+    MatchedSARPair,
+    CopernicusPairSearchRequest,
+    CopernicusPairSearchResponse,
+    CopernicusAcquisitionRequest,
+    CopernicusAcquisitionResponse,
+    CopernicusAuthStatus,
+)
 
 __all__ = [
     "HealthResponse",
@@ -34,4 +46,14 @@ __all__ = [
     "PipelineResult",
     "ChatQuery",
     "ChatResponse",
+    "AOIBounds",
+    "Sentinel1ProductSummary",
+    "CopernicusSearchRequest",
+    "CopernicusSearchResponse",
+    "MatchedSARPair",
+    "CopernicusPairSearchRequest",
+    "CopernicusPairSearchResponse",
+    "CopernicusAcquisitionRequest",
+    "CopernicusAcquisitionResponse",
+    "CopernicusAuthStatus",
 ]

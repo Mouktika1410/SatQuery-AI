@@ -24,6 +24,9 @@ class ImageValidationResult(BaseModel):
     bounds: Optional[Dict[str, float]] = None  # left, bottom, right, top
     data_type: Optional[str] = None
     nodata: Optional[float] = None
+    sensor: Optional[str] = None
+    polarizations: Optional[List[str]] = None
+    is_sar: Optional[bool] = None
     error: Optional[str] = None
 
 
@@ -43,7 +46,7 @@ class FloodDetectionOptions(BaseModel):
     """Configuration options for flood detection algorithm selection."""
     method: str = Field(
         default="auto",
-        description="Detection method: 'auto', 'ndwi', or 'differencing'",
+        description="Detection method: 'auto', 'sar', 'ndwi', or 'differencing'",
     )
     ndwi_green_band: int = Field(
         default=2,
@@ -53,9 +56,17 @@ class FloodDetectionOptions(BaseModel):
         default=4,
         description="Band index for NIR channel (1-indexed, used by NDWI)",
     )
+    sar_polarization: Optional[str] = Field(
+        default="auto",
+        description="SAR polarization to process: 'auto', 'VV', or 'VH'",
+    )
+    sar_water_ceiling_db: Optional[float] = Field(
+        default=-11.0,
+        description="Upper backscatter ceiling (dB) for water classification in calibrated SAR products",
+    )
     threshold: Optional[float] = Field(
         default=None,
-        description="Override Otsu auto-threshold with a fixed value",
+        description="Override auto-threshold with a fixed value (e.g. dB drop for SAR or NDWI value)",
     )
     morphology_iterations: int = Field(
         default=2,

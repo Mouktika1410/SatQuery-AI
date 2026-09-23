@@ -1,11 +1,9 @@
 """
-Sample Scenario Data Generator for SatQuery.
+Scenario Data Generator for SatQuery — Aligned with Kerala Flood Extent.
 
-Generates synthetic georeferenced Sentinel-like imagery and supporting GIS datasets
-(village boundaries, population grid/polygons, buildings, roads, POIs, and DEM)
-for testing the end-to-end flood disaster analysis workflow.
-
-All generated coordinates are centered around a sample flood plain in Maharashtra/Gujarat, India.
+Generates supporting GIS datasets
+(village boundaries, population polygons, buildings, roads, POIs/facilities, and DEM)
+geographically aligned with the Kerala flood detection extent and CRS (EPSG:4326).
 """
 
 import os
@@ -13,64 +11,62 @@ import json
 import math
 import numpy as np
 
-# Bounding box coordinates (WGS84)
-# Center approx: 72.9° E, 19.0° N
-MIN_LON, MAX_LON = 72.80, 73.00
-MIN_LAT, MAX_LAT = 18.90, 19.10
-WIDTH, HEIGHT = 200, 200
+# Bounding box coordinates matching Kerala Sentinel-1 test imagery
+# Center approx: 76.46° E, 9.68° N (Kottayam / Vembanad / Kuttanad, Kerala)
+MIN_LON, MAX_LON = 76.24989963134911, 76.55083525152915
+MIN_LAT, MAX_LAT = 9.34966547711598, 9.750314093833287
+WIDTH, HEIGHT = 335, 446
 
 
 def generate_scenario(base_data_dir: str = "data") -> None:
-    """Generate sample GIS layers and synthetic pre/post GeoTIFFs."""
+    """Generate Kerala GIS layers and supporting DEM raster."""
     os.makedirs(base_data_dir, exist_ok=True)
     for sub in ["boundaries", "population", "buildings", "roads", "pois", "dem", "input", "output"]:
         os.makedirs(os.path.join(base_data_dir, sub), exist_ok=True)
 
-    print(f"Generating synthetic scenario datasets into '{base_data_dir}'...")
+    print(f"Generating Kerala scenario datasets into '{base_data_dir}'...")
 
-    # 1. Generate Village Boundaries GeoJSON (Analytical closed polygons for GIS calculations)
+    # 1. Village Boundaries GeoJSON (Analytical closed polygons for GIS calculations)
+    # Covering North-West (Aymanam), North-East (Arpookara), and South-Central (Kumarakom)
     villages_analytical_geojson = {
         "type": "FeatureCollection",
         "features": [
             {
                 "type": "Feature",
-                "properties": {"name": "Navapur Village", "population": 4200, "zone": "North-West"},
+                "properties": {"name": "Aymanam Village", "population": 4200, "zone": "North-West"},
                 "geometry": {
                     "type": "Polygon",
                     "coordinates": [[
-                        [72.840, 19.018], [72.892, 19.018], [72.892, 19.058], [72.840, 19.058], [72.840, 19.018]
+                        [76.420, 9.670], [76.455, 9.670], [76.455, 9.735], [76.420, 9.735], [76.420, 9.670]
                     ]]
                 }
             },
             {
                 "type": "Feature",
-                "properties": {"name": "Shivaji Nagar", "population": 3100, "zone": "North-East"},
+                "properties": {"name": "Arpookara Village", "population": 3100, "zone": "North-East"},
                 "geometry": {
                     "type": "Polygon",
                     "coordinates": [[
-                        [72.892, 19.018], [72.942, 19.018], [72.942, 19.055], [72.892, 19.055], [72.892, 19.018]
+                        [76.455, 9.670], [76.505, 9.670], [76.505, 9.735], [76.455, 9.735], [76.455, 9.670]
                     ]]
                 }
             },
             {
                 "type": "Feature",
-                "properties": {"name": "Kalyanpur Settlement", "population": 6800, "zone": "South-Central"},
+                "properties": {"name": "Kumarakom Settlement", "population": 6800, "zone": "South-Central"},
                 "geometry": {
                     "type": "Polygon",
                     "coordinates": [[
-                        [72.882, 18.960], [72.942, 18.960], [72.942, 19.018], [72.882, 19.018], [72.882, 18.960]
+                        [76.420, 9.620], [76.505, 9.620], [76.505, 9.670], [76.420, 9.670], [76.420, 9.620]
                     ]]
                 }
             }
         ]
     }
     villages_file = os.path.join(base_data_dir, "boundaries", "villages.geojson")
-    if not (os.path.exists(villages_file) and os.path.getsize(villages_file) > 500):
-        with open(villages_file, "w") as f:
-            json.dump(villages_analytical_geojson, f, indent=2)
-        print(" - Created data/boundaries/villages.geojson (analytical closed polygons)")
-    else:
-        print(" - Preserved real data/boundaries/villages.geojson")
+    if os.path.exists(villages_file) and os.path.getsize(villages_file) > 2000:
+        print(" - Preserved real Kerala data/boundaries/villages.geojson")
+        return
 
     # Visual village boundary overlay GeoJSON (Open dashed reference lines for map display)
     villages_visual_geojson = {
@@ -78,31 +74,31 @@ def generate_scenario(base_data_dir: str = "data") -> None:
         "features": [
             {
                 "type": "Feature",
-                "properties": {"name": "Navapur Village", "population": 4200, "zone": "North-West"},
+                "properties": {"name": "Aymanam Village", "population": 4200, "zone": "North-West"},
                 "geometry": {
                     "type": "LineString",
                     "coordinates": [
-                        [72.840, 19.018], [72.892, 19.018], [72.892, 19.058]
+                        [76.420, 9.670], [76.455, 9.670], [76.455, 9.735]
                     ]
                 }
             },
             {
                 "type": "Feature",
-                "properties": {"name": "Shivaji Nagar", "population": 3100, "zone": "North-East"},
+                "properties": {"name": "Arpookara Village", "population": 3100, "zone": "North-East"},
                 "geometry": {
                     "type": "LineString",
                     "coordinates": [
-                        [72.892, 19.018], [72.942, 19.018], [72.942, 19.055]
+                        [76.455, 9.670], [76.505, 9.670], [76.505, 9.735]
                     ]
                 }
             },
             {
                 "type": "Feature",
-                "properties": {"name": "Kalyanpur Settlement", "population": 6800, "zone": "South-Central"},
+                "properties": {"name": "Kumarakom Settlement", "population": 6800, "zone": "South-Central"},
                 "geometry": {
                     "type": "LineString",
                     "coordinates": [
-                        [72.882, 19.018], [72.882, 18.960], [72.942, 18.960], [72.942, 19.018]
+                        [76.420, 9.670], [76.420, 9.620], [76.505, 9.620], [76.505, 9.670]
                     ]
                 }
             }
@@ -112,131 +108,93 @@ def generate_scenario(base_data_dir: str = "data") -> None:
         json.dump(villages_visual_geojson, f, indent=2)
     print(" - Created data/boundaries/villages_visual.geojson (open dashed reference overlay)")
 
-    # 2. Generate Population GeoJSON (preserve real population dataset if present)
+    # 2. Population GeoJSON
     pop_file = os.path.join(base_data_dir, "population", "population.geojson")
-    should_write_pop = True
-    if os.path.exists(pop_file):
-        try:
-            with open(pop_file, "r") as pf:
-                existing_pop = json.load(pf)
-                if len(existing_pop.get("features", [])) > 10:
-                    should_write_pop = False
-        except Exception:
-            pass
+    with open(pop_file, "w") as f:
+        json.dump(villages_analytical_geojson, f, indent=2)
+    print(" - Created data/population/population.geojson")
 
-    if should_write_pop:
-        with open(pop_file, "w") as f:
-            json.dump(villages_analytical_geojson, f, indent=2)
-        print(" - Created data/population/population.geojson")
-    else:
-        print(" - Preserved real data/population/population.geojson")
-
-    # 3. Generate Building Footprints GeoJSON (preserve real building dataset if present)
+    # 3. Building Footprints GeoJSON (distributed across settlements in the Kerala flood plain)
+    buildings_features = []
+    np.random.seed(42)
+    for i in range(40):
+        bx = float(np.random.uniform(76.430, 76.490))
+        by = float(np.random.uniform(9.630, 9.720))
+        size = 0.002
+        buildings_features.append({
+            "type": "Feature",
+            "properties": {"building_id": f"BLD_{i+1:03d}", "type": "residential"},
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[
+                    [bx, by], [bx + size, by], [bx + size, by + size], [bx, by + size], [bx, by]
+                ]]
+            }
+        })
     bld_file = os.path.join(base_data_dir, "buildings", "buildings.geojson")
-    should_write_bld = True
-    if os.path.exists(bld_file):
-        try:
-            with open(bld_file, "r") as bf:
-                existing_bld = json.load(bf)
-                if len(existing_bld.get("features", [])) > 100:
-                    should_write_bld = False
-        except Exception:
-            pass
+    with open(bld_file, "w") as f:
+        json.dump({"type": "FeatureCollection", "features": buildings_features}, f, indent=2)
+    print(f" - Created data/buildings/buildings.geojson ({len(buildings_features)} footprints)")
 
-    if should_write_bld:
-        buildings_features = []
-        np.random.seed(42)
-        for i in range(40):
-            bx = np.random.uniform(72.84, 72.96)
-            by = np.random.uniform(18.94, 19.06)
-            size = 0.002
-            buildings_features.append({
-                "type": "Feature",
-                "properties": {"building_id": f"BLD_{i+1:03d}", "type": "residential"},
-                "geometry": {
-                    "type": "Polygon",
-                    "coordinates": [[
-                        [bx, by], [bx + size, by], [bx + size, by + size], [bx, by + size], [bx, by]
-                    ]]
-                }
-            })
-        with open(bld_file, "w") as f:
-            json.dump({"type": "FeatureCollection", "features": buildings_features}, f, indent=2)
-        print(f" - Created data/buildings/buildings.geojson ({len(buildings_features)} footprints)")
-    else:
-        print(" - Preserved real data/buildings/buildings.geojson")
-
-    # 4. Generate Road Network GeoJSON (preserve real road dataset if present)
+    # 4. Road Network GeoJSON (Intersects the Kerala flood plain)
     roads_file = os.path.join(base_data_dir, "roads", "roads.geojson")
-    should_write_roads = True
-    if os.path.exists(roads_file):
-        try:
-            with open(roads_file, "r") as rf:
-                existing_roads = json.load(rf)
-                if len(existing_roads.get("features", [])) > 10:
-                    should_write_roads = False
-        except Exception:
-            pass
-
-    if should_write_roads:
-        roads_geojson = {
-            "type": "FeatureCollection",
-            "features": [
-                {
-                    "type": "Feature",
-                    "properties": {"name": "National Highway 48 Bypass", "highway": "primary"},
-                    "geometry": {
-                        "type": "LineString",
-                        "coordinates": [
-                            [72.81, 18.92], [72.86, 18.97], [72.91, 19.02], [72.97, 19.07]
-                        ]
-                    }
-                },
-                {
-                    "type": "Feature",
-                    "properties": {"name": "River Coastal Link Road", "highway": "secondary"},
-                    "geometry": {
-                        "type": "LineString",
-                        "coordinates": [
-                            [72.84, 19.07], [72.88, 19.01], [72.93, 18.96], [72.98, 18.93]
-                        ]
-                    }
+    roads_geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"name": "State Highway 52 (Kumarakom - Kottayam Road)", "highway": "primary"},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [
+                        [76.400, 9.635], [76.440, 9.650], [76.475, 9.665], [76.515, 9.680]
+                    ]
                 }
-            ]
-        }
-        with open(roads_file, "w") as f:
-            json.dump(roads_geojson, f, indent=2)
-        print(" - Created data/roads/roads.geojson")
-    else:
-        print(" - Preserved real data/roads/roads.geojson")
+            },
+            {
+                "type": "Feature",
+                "properties": {"name": "Meenachil River Basin Corridor", "highway": "secondary"},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [
+                        [76.435, 9.730], [76.450, 9.690], [76.465, 9.655], [76.495, 9.625]
+                    ]
+                }
+            }
+        ]
+    }
+    with open(roads_file, "w") as f:
+        json.dump(roads_geojson, f, indent=2)
+    print(" - Created data/roads/roads.geojson")
 
-    # 5. Generate POIs / Candidate Evacuation Facilities
+    # 5. POIs / Candidate Evacuation Facilities (Located on safe, dry ground surrounding Kerala flood zone)
     pois_geojson = {
         "type": "FeatureCollection",
         "features": [
             {
                 "type": "Feature",
-                "properties": {"name": "Govt High School Navapur", "type": "school", "capacity": 500},
-                "geometry": {"type": "Point", "coordinates": [72.835, 19.075]}
+                "properties": {"name": "Govt Higher Secondary School Kumarakom", "type": "school", "capacity": 500},
+                "geometry": {"type": "Point", "coordinates": [76.415, 9.645]}
             },
             {
                 "type": "Feature",
-                "properties": {"name": "Community Hall Kalyanpur", "type": "community_hall", "capacity": 300},
-                "geometry": {"type": "Point", "coordinates": [72.975, 18.935]}
+                "properties": {"name": "Aymanam Community Relief Hall", "type": "community_hall", "capacity": 350},
+                "geometry": {"type": "Point", "coordinates": [76.418, 9.715]}
             },
             {
                 "type": "Feature",
-                "properties": {"name": "District Civic Center", "type": "government", "capacity": 800},
-                "geometry": {"type": "Point", "coordinates": [72.825, 18.925]}
+                "properties": {"name": "Kottayam District Civic Shelter", "type": "government", "capacity": 800},
+                "geometry": {"type": "Point", "coordinates": [76.510, 9.640]}
             },
             {
                 "type": "Feature",
-                "properties": {"name": "East Hill Primary Health Centre", "type": "clinic", "capacity": 150},
-                "geometry": {"type": "Point", "coordinates": [72.985, 19.085]}
+                "properties": {"name": "Arpookara Medical College Primary Centre", "type": "clinic", "capacity": 250},
+                "geometry": {"type": "Point", "coordinates": [76.485, 9.742]}
             }
         ]
     }
-    with open(os.path.join(base_data_dir, "pois", "facilities.geojson"), "w") as f:
+    pois_file = os.path.join(base_data_dir, "pois", "facilities.geojson")
+    with open(pois_file, "w") as f:
         json.dump(pois_geojson, f, indent=2)
     print(" - Created data/pois/facilities.geojson")
 
@@ -250,56 +208,12 @@ def generate_scenario(base_data_dir: str = "data") -> None:
         transform = from_bounds(MIN_LON, MIN_LAT, MAX_LON, MAX_LAT, WIDTH, HEIGHT)
         crs = CRS.from_epsg(4326)
 
-        np.random.seed(42)
-
         grid_y, grid_x = np.ogrid[:HEIGHT, :WIDTH]
         norm_x = grid_x / float(WIDTH - 1)
         norm_y = grid_y / float(HEIGHT - 1)
 
-        # Central centroid of the main inundation region (matching reference image)
-        cx, cy = 0.50, 0.48
-        r_dist = np.sqrt((norm_x - cx)**2 + (norm_y - cy)**2)
-
-        # Multi-scale smooth Gaussian Random Field (uneven lobes, branching extensions & micro-edges)
-        r1 = np.random.randn(HEIGHT, WIDTH)
-        r2 = np.random.randn(HEIGHT, WIDTH)
-        r3 = np.random.randn(HEIGHT, WIDTH)
-
-        try:
-            from scipy import ndimage as ndi
-            g1 = ndi.gaussian_filter(r1, sigma=20.0)
-            g2 = ndi.gaussian_filter(r2, sigma=8.0)
-            g3 = ndi.gaussian_filter(r3, sigma=3.0)
-        except ImportError:
-            g1, g2, g3 = r1, r2, r3
-
-        noise_field = g1 * 0.50 + g2 * 0.35 + g3 * 0.15
-        n_min, n_max = noise_field.min(), noise_field.max()
-        noise_norm = (noise_field - n_min) / (n_max - n_min + 1e-10)
-
-        # Dynamic Organic Coastal Bay Inundation Radius Field (matching exact reference silhouette)
-        organic_radius = 0.22 + 0.22 * noise_norm
-
-        # Single dominant, broad, continuous, organic flood region matching reference silhouette
-        raw_flood_mask = r_dist < organic_radius
-        raw_flood_mask[0, :] = False
-        raw_flood_mask[-1, :] = False
-        raw_flood_mask[:, 0] = False
-        raw_flood_mask[:, -1] = False
-
-        # Fill internal holes to guarantee 0 holes
-        clean_flood_mask = ndi.binary_fill_holes(raw_flood_mask)
-
-        # Retain single largest connected component (guarantees 0 disconnected fragments)
-        lbl, num = ndi.label(clean_flood_mask)
-        if num > 1:
-            sizes = ndi.sum(clean_flood_mask, lbl, range(1, num + 1))
-            largest_label = np.argmax(sizes) + 1
-            flood_mask = (lbl == largest_label)
-        else:
-            flood_mask = clean_flood_mask
-
-        dem_data = (10.0 + 65.0 * r_dist - 15.0 * noise_norm).astype(np.float32)
+        # Elevation varies from low near lake/plain (3-8m) rising toward east (25-45m)
+        dem_data = (4.0 + 35.0 * norm_x + 8.0 * (1.0 - norm_y)).astype(np.float32)
 
         dem_path = os.path.join(base_data_dir, "dem", "dem_elevation.tif")
         with rasterio.open(
@@ -309,45 +223,10 @@ def generate_scenario(base_data_dir: str = "data") -> None:
             dst.write(dem_data, 1)
         print(" - Created data/dem/dem_elevation.tif")
 
-        # Synthetic Sentinel Multi-band (uint8 RGB + NIR for Windows Explorer thumbnail compatibility)
-        # Band 1=Red, Band 2=Green, Band 3=Blue, Band 4=NIR
-        pre_raster = np.zeros((4, HEIGHT, WIDTH), dtype=np.uint8)
-        pre_raster[0] = 70   # Red
-        pre_raster[1] = 110  # Green
-        pre_raster[2] = 65   # Blue
-        pre_raster[3] = 180  # NIR
-
-        pre_path = os.path.join(base_data_dir, "input", "sample_pre_flood_sentinel.tif")
-        with rasterio.open(
-            pre_path, "w", driver="GTiff", height=HEIGHT, width=WIDTH,
-            count=4, dtype=rasterio.uint8, crs=crs, transform=transform,
-            photometric="RGB"
-        ) as dst:
-            dst.colorinterp = [ColorInterp.red, ColorInterp.green, ColorInterp.blue, ColorInterp.nir]
-            dst.write(pre_raster)
-        print(" - Created data/input/sample_pre_flood_sentinel.tif")
-
-        # Post-flood: organic flood plume matching reference image
-        post_raster = np.copy(pre_raster)
-        post_raster[0, flood_mask] = 30   # Red
-        post_raster[1, flood_mask] = 80   # Green
-        post_raster[2, flood_mask] = 180  # High Blue
-        post_raster[3, flood_mask] = 10   # Low NIR -> strong water NDWI signature
-
-        post_path = os.path.join(base_data_dir, "input", "sample_post_flood_sentinel.tif")
-        with rasterio.open(
-            post_path, "w", driver="GTiff", height=HEIGHT, width=WIDTH,
-            count=4, dtype=rasterio.uint8, crs=crs, transform=transform,
-            photometric="RGB"
-        ) as dst:
-            dst.colorinterp = [ColorInterp.red, ColorInterp.green, ColorInterp.blue, ColorInterp.nir]
-            dst.write(post_raster)
-        print(" - Created data/input/sample_post_flood_sentinel.tif")
-
     except ImportError:
         print(" (rasterio not installed yet — synthetic GeoTIFF generation skipped; vector GeoJSON layers created.)")
 
-    print("\nScenario dataset generation complete.")
+    print("\nKerala scenario dataset generation complete.")
 
 
 if __name__ == "__main__":

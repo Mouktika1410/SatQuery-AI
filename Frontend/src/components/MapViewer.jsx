@@ -1,16 +1,11 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { Focus, Maximize2, Minimize2, X, Satellite } from 'lucide-react';
 
 export default function MapViewer({
-  mode = 'overview', // 'overview' | 'impact'
   floodGeoJSON,
   floodMetrics,
-  centroid,
-  populationGeoJSON,
-  exposedPopulation,
-  buildingsGeoJSON,
-  affectedBuildings,
   evacuationCandidates,
   affectedVillages,
   affectedVillagesGeoJSON,
@@ -18,36 +13,45 @@ export default function MapViewer({
   priorityScores,
   selectedFeature,
   onSelectFeature,
+  skipAnimation = false,
 }) {
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const floodLayerRef = useRef(null);
-  const popLayerRef = useRef(null);
-  const bldLayerRef = useRef(null);
   const villagesLayerRef = useRef(null);
   const roadsLayerRef = useRef(null);
   const evacuLayerRef = useRef(null);
-  const centMarkerRef = useRef(null);
   const layerControlRef = useRef(null);
   const baseLayersRef = useRef({});
   const overlayLayersRef = useRef({});
   const lastAnalysisBoundsRef = useRef(null);
 
+  // Active layer visibility state for custom legend or controls
+  const [activeLayers, setActiveLayers] = useState({
+    flood: true,
+    villages: true,
+    roads: true,
+    evac: true,
+  });
+
+  // Track fullscreen state safely
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Initialize Leaflet map once
+  // Initialize Leaflet map once - begins with the wide India-level view from the sample-data workflow
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
     const map = L.map(mapContainerRef.current, {
-      center: [20.5937, 78.9629],
+      center: [20.5937, 78.9629], // Center over India as broad neutral baseline
       zoom: 5,
       zoomControl: false,
       attributionControl: true,
     });
 
+    // Custom Zoom control top-left
     L.control.zoom({ position: 'topleft' }).addTo(map);
 
+    // Base tile layers: Esri World Imagery Satellite & OpenStreetMap
     const osm = L.tileLayer(
       'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       {
@@ -64,6 +68,7 @@ export default function MapViewer({
       }
     );
 
+    // Default to Satellite basemap
     satellite.addTo(map);
 
     const baseMaps = {
@@ -82,11 +87,22 @@ export default function MapViewer({
     layerControl.addTo(map);
     layerControlRef.current = layerControl;
 
-    mapInstanceRef.current = map;
+    // Track layer add/remove to keep legend synced
+    map.on('overlayadd', (e) => {
+      if (e.name.includes('Flood')) setActiveLayers((prev) => ({ ...prev, flood: true }));
+      if (e.name.includes('Villages')) setActiveLayers((prev) => ({ ...prev, villages: true }));
+      if (e.name.includes('Roads')) setActiveLayers((prev) => ({ ...prev, roads: true }));
+      if (e.name.includes('Candidate') || e.name.includes('Evacuation')) setActiveLayers((prev) => ({ ...prev, evac: true }));
+    });
 
-    setTimeout(() => {
-      map.invalidateSize();
-    }, 250);
+    map.on('overlayremove', (e) => {
+      if (e.name.includes('Flood')) setActiveLayers((prev) => ({ ...prev, flood: false }));
+      if (e.name.includes('Villages')) setActiveLayers((prev) => ({ ...prev, villages: false }));
+      if (e.name.includes('Roads')) setActiveLayers((prev) => ({ ...prev, roads: false }));
+      if (e.name.includes('Candidate') || e.name.includes('Evacuation')) setActiveLayers((prev) => ({ ...prev, evac: false }));
+    });
+
+    mapInstanceRef.current = map;
 
     return () => {
       map.remove();
@@ -98,7 +114,7 @@ export default function MapViewer({
   const handleResetBounds = useCallback(() => {
     const map = mapInstanceRef.current;
     if (map && lastAnalysisBoundsRef.current && lastAnalysisBoundsRef.current.isValid()) {
-      map.fitBounds(lastAnalysisBoundsRef.current, { padding: [35, 35], maxZoom: 15, animate: true });
+      map.fitBounds(lastAnalysisBoundsRef.current, { padding: [45, 45], maxZoom: 14, animate: true });
     }
   }, []);
 
@@ -120,6 +136,20 @@ export default function MapViewer({
     }
   }, []);
 
+  // Build lookups for fast access
+  const priorityLookup = useRef({});
+  useEffect(() => {
+    const lookup = {};
+    if (priorityScores && Array.isArray(priorityScores)) {
+      priorityScores.forEach((p) => {
+        if (p.village_name) {
+          lookup[p.village_name.toLowerCase().trim()] = p;
+        }
+      });
+    }
+    priorityLookup.current = lookup;
+  }, [priorityScores]);
+
   const villageLookup = useRef({});
   useEffect(() => {
     const lookup = {};
@@ -133,16 +163,15 @@ export default function MapViewer({
     villageLookup.current = lookup;
   }, [affectedVillages]);
 
-  // Update GIS Layers whenever props change
+  // Update layers and fit/fly bounds smoothly whenever pipeline results update
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    let floodBounds = null;
-    let fallbackBounds = null;
+    let combinedBounds = null;
 
     // -------------------------------------------------------------------------
-    // 1. FLOOD EXTENT LAYER (ONE MAIN VISUAL FOCUS)
+    // 1. FLOOD EXTENT LAYER (Real completed polygon, no duplicate animation)
     // -------------------------------------------------------------------------
     if (floodLayerRef.current) {
       try {
@@ -155,23 +184,28 @@ export default function MapViewer({
     if (floodGeoJSON && floodGeoJSON.features && floodGeoJSON.features.length > 0) {
       const areaVal = floodMetrics?.areaKm2 != null ? Number(floodMetrics.areaKm2).toFixed(2) : null;
       const areaStr = areaVal ? `${areaVal} km²` : 'Calculated Extent';
+      const pctStr = floodMetrics?.floodPercentage != null ? `${Number(floodMetrics.floodPercentage).toFixed(2)}%` : null;
       const countStr = floodMetrics?.polygonCount != null ? floodMetrics.polygonCount : floodGeoJSON.features.length;
 
       const floodLayer = L.geoJSON(floodGeoJSON, {
         style: {
-          color: '#00e5ff', // Vivid cyan border
-          weight: 2.5,
+          className: 'flood-polygon-path',
+          color: '#00e5ff', // Vivid cyan outline
+          weight: 2.2,
           opacity: 0.95,
-          fillColor: '#0284c7', // Translucent blue/cyan fill
-          fillOpacity: 0.55,
+          fillColor: '#0284c7', // Bright translucent blue flood fill
+          fillOpacity: 0.62,
+          lineJoin: 'round',
+          lineCap: 'round',
         },
         onEachFeature: (feature, lyr) => {
           lyr.on({
             mouseover: (e) => {
-              e.target.setStyle({
+              const layer = e.target;
+              layer.setStyle({
                 fillColor: '#38bdf8',
                 fillOpacity: 0.75,
-                weight: 3.5,
+                weight: 3.2,
                 color: '#00ffff',
               });
             },
@@ -184,18 +218,23 @@ export default function MapViewer({
             '<div class="gis-popup flood-popup">' +
               '<div class="gis-popup-header">' +
                 '<div class="gis-popup-title">Detected Flood Extent</div>' +
-                '<span class="gis-popup-badge" style="background:#0284c7; color:#fff;">SATELLITE DETECTED</span>' +
               '</div>' +
               '<div class="gis-popup-body">' +
                 '<div class="gis-popup-row">' +
                   '<span class="gis-popup-label">Flooded Area:</span>' +
-                  `<span class="gis-popup-val" style="color:#0284c7; font-weight:700;">${areaStr}</span>` +
+                  `<span class="gis-popup-val highlight-blue">${areaStr}</span>` +
                 '</div>' +
+                (pctStr
+                  ? '<div class="gis-popup-row">' +
+                      '<span class="gis-popup-label">Image Coverage:</span>' +
+                      `<span class="gis-popup-val">${pctStr}</span>` +
+                    '</div>'
+                  : '') +
                 '<div class="gis-popup-row">' +
-                  '<span class="gis-popup-label">Polygon Count:</span>' +
+                  '<span class="gis-popup-label">Polygons Count:</span>' +
                   `<span class="gis-popup-val">${countStr}</span>` +
                 '</div>' +
-                '<div class="gis-popup-footnote">Generated via GEE Sentinel-1 SAR change detection</div>' +
+                '<div class="gis-popup-footnote">Generated via satellite water-detection and vector simplification</div>' +
               '</div>' +
             '</div>',
             { maxWidth: 260 }
@@ -205,72 +244,18 @@ export default function MapViewer({
 
       floodLayer.addTo(map);
       floodLayerRef.current = floodLayer;
-      layerControlRef.current?.addOverlay(floodLayer, '🌊 Flooded Area');
+      layerControlRef.current?.addOverlay(floodLayer, 'Flood Extent');
 
       try {
         const b = floodLayer.getBounds();
         if (b && b.isValid()) {
-          floodBounds = b;
+          combinedBounds = combinedBounds ? combinedBounds.extend(b) : b;
         }
       } catch (_) {}
     }
 
     // -------------------------------------------------------------------------
-    // 2. CENTROID MARKER
-    // -------------------------------------------------------------------------
-    if (centMarkerRef.current) {
-      try {
-        map.removeLayer(centMarkerRef.current);
-      } catch (_) {}
-      centMarkerRef.current = null;
-    }
-
-    if (centroid && centroid.latitude != null && centroid.longitude != null) {
-      const centIcon = L.divIcon({
-        className: 'custom-centroid-marker-wrapper',
-        html: (
-          '<div class="custom-centroid-pin" title="Flood Centroid" style="background:#475569; width:20px; height:20px; border-radius:50%; border:2px solid #ffffff; box-shadow:0 0 8px rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; color:#fff; font-size:10px;">' +
-            '📍' +
-          '</div>'
-        ),
-        iconSize: [20, 20],
-        iconAnchor: [10, 10],
-        popupAnchor: [0, -10],
-      });
-
-      const centMarker = L.marker([centroid.latitude, centroid.longitude], { icon: centIcon });
-      centMarker.bindPopup(
-        '<div class="gis-popup centroid-popup">' +
-          '<div class="gis-popup-header">' +
-            '<div class="gis-popup-title">Flood Extent Centroid</div>' +
-          '</div>' +
-          '<div class="gis-popup-body">' +
-            '<div class="gis-popup-row">' +
-              '<span class="gis-popup-label">Latitude:</span>' +
-              `<span class="gis-popup-val">${centroid.latitude.toFixed(6)}° N</span>` +
-            '</div>' +
-            '<div class="gis-popup-row">' +
-              '<span class="gis-popup-label">Longitude:</span>' +
-              `<span class="gis-popup-val">${centroid.longitude.toFixed(6)}° E</span>` +
-            '</div>' +
-            '<div class="gis-popup-footnote">Geographic centroid of detected flood polygon</div>' +
-          '</div>' +
-        '</div>',
-        { maxWidth: 240 }
-      );
-
-      centMarker.addTo(map);
-      centMarkerRef.current = centMarker;
-
-      const pBounds = L.latLngBounds([
-        L.latLng(centroid.latitude, centroid.longitude),
-        L.latLng(centroid.latitude, centroid.longitude)
-      ]);
-      fallbackBounds = fallbackBounds ? fallbackBounds.extend(pBounds) : pBounds;
-    }
-
-    // -------------------------------------------------------------------------
-    // 3. REAL AFFECTED VILLAGE/ADMINISTRATIVE BOUNDARIES WITH LABELS
+    // 2. INTERACTIVE VILLAGES LAYER (Real Kerala village boundaries)
     // -------------------------------------------------------------------------
     if (villagesLayerRef.current) {
       try {
@@ -287,39 +272,39 @@ export default function MapViewer({
           const isSelected = selectedFeature?.type === 'village' && selectedFeature?.name?.toLowerCase().trim() === vName;
 
           return {
-            color: isSelected ? '#ef4444' : '#f59e0b', // Amber boundary stroke
-            weight: isSelected ? 3.5 : 2.2,
+            color: isSelected ? '#ef4444' : '#f59e0b', // Red highlight if selected, else amber/orange
+            weight: isSelected ? 3.5 : 2.0,
             opacity: 0.95,
-            fillColor: '#fbbf24',
-            fillOpacity: 0.18,
-            dashArray: '5, 5',
+            fill: false,
+            fillOpacity: 0,
+            dashArray: isSelected ? undefined : '6, 5',
           };
         },
         onEachFeature: (feature, lyr) => {
           const rawName = feature.properties?.name || feature.properties?.NAME || 'Affected Village';
           const cleanKey = rawName.toLowerCase().trim();
           const vData = villageLookup.current[cleanKey];
+          const pData = priorityLookup.current[cleanKey];
 
-          // Permanent clear label over village center on map
-          lyr.bindTooltip(
-            `<div class="village-map-label">🏘️ ${rawName}</div>`,
-            {
-              permanent: true,
-              direction: 'center',
-              className: 'custom-village-label',
-            }
-          );
+          const floodedKm2 = vData?.area_flooded_km2 != null ? `${vData.area_flooded_km2.toFixed(2)} km²` : null;
+          const popEst = vData?.population_affected != null ? vData.population_affected.toLocaleString() : null;
+          const rank = pData?.rank != null ? `#${pData.rank}` : null;
+          const score = pData?.priority_score != null ? pData.priority_score.toFixed(3) : null;
 
           lyr.on({
             mouseover: (e) => {
-              e.target.setStyle({ weight: 3.5, fillOpacity: 0.35, color: '#d97706' });
+              const layer = e.target;
+              layer.setStyle({
+                weight: 3.5,
+                color: '#b45309',
+              });
             },
             mouseout: (e) => {
               villagesLayer.resetStyle(e.target);
             },
             click: () => {
               if (onSelectFeature) {
-                onSelectFeature({ type: 'village', name: rawName, data: vData });
+                onSelectFeature({ type: 'village', name: rawName, data: { ...vData, ...pData } });
               }
             },
           });
@@ -328,48 +313,52 @@ export default function MapViewer({
             '<div class="gis-popup village-popup">' +
               '<div class="gis-popup-header">' +
                 `<div class="gis-popup-title">${rawName}</div>` +
-                '<span class="gis-popup-badge" style="background:#f59e0b; color:#fff;">AFFECTED DIVISION</span>' +
+                (rank ? `<span class="gis-popup-badge badge-amber">Rank ${rank}</span>` : '') +
               '</div>' +
               '<div class="gis-popup-body">' +
-                '<div class="gis-popup-row">' +
-                  '<span class="gis-popup-label">District / Taluk:</span>' +
-                  `<span class="gis-popup-val">${feature.properties?.district || 'Kottayam'} / ${feature.properties?.taluk || 'Kottayam'}</span>` +
-                '</div>' +
-                '<div class="gis-popup-row">' +
-                  '<span class="gis-popup-label">Boundary Status:</span>' +
-                  '<span class="gis-popup-val" style="color:#d97706; font-weight:700;">Intersecting Flood Extent</span>' +
+                (floodedKm2
+                  ? '<div class="gis-popup-row">' +
+                      '<span class="gis-popup-label">Flooded Inundation:</span>' +
+                      `<span class="gis-popup-val highlight-amber">${floodedKm2}</span>` +
+                    '</div>'
+                  : '') +
+                (score
+                  ? '<div class="gis-popup-row">' +
+                      '<span class="gis-popup-label">Urgency Score:</span>' +
+                      `<span class="gis-popup-val font-mono">${score}</span>` +
+                    '</div>'
+                  : '') +
+                (popEst
+                  ? '<div class="gis-popup-row">' +
+                      '<span class="gis-popup-label">Estimated Pop Affected:</span>' +
+                      `<span class="gis-popup-val">${popEst}</span>` +
+                    '</div>'
+                  : '') +
+                '<div class="gis-popup-footnote alert-box">' +
+                  'Heuristic decision-support score from spatial overlay. Field verification advised.' +
                 '</div>' +
               '</div>' +
             '</div>',
-            { maxWidth: 260 }
+            { maxWidth: 280 }
           );
         },
       });
 
       villagesLayer.addTo(map);
       villagesLayerRef.current = villagesLayer;
-      layerControlRef.current?.addOverlay(villagesLayer, '🏘️ Affected Villages');
+      layerControlRef.current?.addOverlay(villagesLayer, 'Affected Villages');
+
+      try {
+        const b = villagesLayer.getBounds();
+        if (b && b.isValid()) {
+          combinedBounds = combinedBounds ? combinedBounds.extend(b) : b;
+        }
+      } catch (_) {}
     }
 
     // -------------------------------------------------------------------------
-    // 4. IMPACT ANALYSIS LAYERS (PEOPLE, BUILDINGS, ROADS) - ONLY IN IMPACT MODE
+    // 3. AFFECTED ROADS LAYER (Real Kerala road corridors)
     // -------------------------------------------------------------------------
-    if (popLayerRef.current) {
-      try {
-        layerControlRef.current?.removeLayer(popLayerRef.current);
-        map.removeLayer(popLayerRef.current);
-      } catch (_) {}
-      popLayerRef.current = null;
-    }
-
-    if (bldLayerRef.current) {
-      try {
-        layerControlRef.current?.removeLayer(bldLayerRef.current);
-        map.removeLayer(bldLayerRef.current);
-      } catch (_) {}
-      bldLayerRef.current = null;
-    }
-
     if (roadsLayerRef.current) {
       try {
         layerControlRef.current?.removeLayer(roadsLayerRef.current);
@@ -378,77 +367,177 @@ export default function MapViewer({
       roadsLayerRef.current = null;
     }
 
-    if (mode === 'impact') {
-      // Population
-      if (populationGeoJSON && populationGeoJSON.features && populationGeoJSON.features.length > 0) {
-        const exposedPopFeatures = populationGeoJSON.features.filter((f) => f.properties?.is_exposed === true);
-        const popGroup = L.layerGroup();
-        exposedPopFeatures.forEach((feature) => {
-          const popVal = feature.properties?.population != null ? Number(feature.properties.population) : 0;
-          if (popVal <= 0) return;
-          let cLat = null, cLng = null;
-          try {
-            const b = L.geoJSON(feature).getBounds();
-            if (b && b.isValid()) {
-              const c = b.getCenter();
-              cLat = c.lat; cLng = c.lng;
-            }
-          } catch (_) {}
-          if (cLat == null || cLng == null) return;
-          const formattedPop = popVal >= 1000 ? `${(popVal / 1000).toFixed(1)}k` : popVal.toLocaleString();
-          const personIcon = L.divIcon({
-            className: 'custom-pop-marker-wrapper',
-            html: `<div class="custom-pop-badge" title="${popVal.toLocaleString()} exposed people"><span class="pop-icon">👥</span><span class="pop-count">${formattedPop}</span></div>`,
-            iconSize: [52, 22],
-            iconAnchor: [26, 11],
-            popupAnchor: [0, -10],
+    if (affectedRoadsGeoJSON && affectedRoadsGeoJSON.features && affectedRoadsGeoJSON.features.length > 0) {
+      const roadsLayer = L.geoJSON(affectedRoadsGeoJSON, {
+        style: (feature) => {
+          const isPrimary = feature?.properties?.highway === 'primary';
+          return {
+            color: '#ef4444', // High contrast red
+            weight: isPrimary ? 4.5 : 2.5,
+            opacity: 0.95,
+            dashArray: '6, 6',
+          };
+        },
+        onEachFeature: (feature, lyr) => {
+          const roadName = feature.properties?.name || 'Inundated Road Corridor';
+          const highwayType = feature.properties?.highway || feature.properties?.type || 'Road Network';
+
+          lyr.on({
+            mouseover: (e) => {
+              e.target.setStyle({ weight: 6.5, color: '#b91c1c' });
+            },
+            mouseout: (e) => {
+              roadsLayer.resetStyle(e.target);
+            },
           });
-          const marker = L.marker([cLat, cLng], { icon: personIcon });
-          marker.bindPopup(`<div class="gis-popup pop-popup"><div class="gis-popup-header"><div class="gis-popup-title">Exposed Population</div></div><div class="gis-popup-body"><div class="gis-popup-row"><span class="gis-popup-label">Exposed People:</span><span class="gis-popup-val" style="color:#e11d48; font-weight:700;">${popVal.toLocaleString()} people</span></div></div></div>`, { maxWidth: 260 });
-          popGroup.addLayer(marker);
-        });
-        popGroup.addTo(map);
-        popLayerRef.current = popGroup;
-        layerControlRef.current?.addOverlay(popGroup, '👥 People Exposed');
-      }
 
-      // Buildings
-      if (buildingsGeoJSON && buildingsGeoJSON.features && buildingsGeoJSON.features.length > 0) {
-        const exposedBldFeatures = buildingsGeoJSON.features.filter((f) => f.properties?.is_exposed === true);
-        const bldGeoJSONToRender = exposedBldFeatures.length > 0 ? { ...buildingsGeoJSON, features: exposedBldFeatures } : buildingsGeoJSON;
-        const bldLayer = L.geoJSON(bldGeoJSONToRender, {
-          style: { color: '#d97706', weight: 1.6, opacity: 0.95, fillColor: '#f59e0b', fillOpacity: 0.7 },
-        });
-        bldLayer.addTo(map);
-        bldLayerRef.current = bldLayer;
-        layerControlRef.current?.addOverlay(bldLayer, '🏠 Affected Buildings');
-      }
+          lyr.bindPopup(
+            '<div class="gis-popup road-popup">' +
+              '<div class="gis-popup-header">' +
+                `<div class="gis-popup-title">${roadName}</div>` +
+              '</div>' +
+              '<div class="gis-popup-body">' +
+                '<div class="gis-popup-row">' +
+                  '<span class="gis-popup-label">Corridor Classification:</span>' +
+                  `<span class="gis-popup-val font-mono">${highwayType}</span>` +
+                '</div>' +
+                '<div class="gis-popup-status-badge road-status-badge">' +
+                  'Inundated / Submerged Segment — Impassable' +
+                '</div>' +
+                '<div class="gis-popup-footnote">Road vector geometry intersected with detected flood boundary</div>' +
+              '</div>' +
+            '</div>',
+            { maxWidth: 260 }
+          );
+        },
+      });
 
-      // Roads
-      if (affectedRoadsGeoJSON && affectedRoadsGeoJSON.features && affectedRoadsGeoJSON.features.length > 0) {
-        const roadsLayer = L.geoJSON(affectedRoadsGeoJSON, {
-          style: { color: '#ef4444', weight: 3.5, opacity: 0.95, dashArray: '6, 6' },
-        });
-        roadsLayer.addTo(map);
-        roadsLayerRef.current = roadsLayer;
-        layerControlRef.current?.addOverlay(roadsLayer, '🛣️ Affected Roads');
-      }
+      roadsLayer.addTo(map);
+      roadsLayerRef.current = roadsLayer;
+      layerControlRef.current?.addOverlay(roadsLayer, 'Inundated Roads');
+
+      try {
+        const b = roadsLayer.getBounds();
+        if (b && b.isValid()) {
+          combinedBounds = combinedBounds ? combinedBounds.extend(b) : b;
+        }
+      } catch (_) {}
     }
 
     // -------------------------------------------------------------------------
-    // 5. AUTOMATICALLY ZOOM TIGHTLY TO DETECTED FLOOD POLYGON BOUNDS
+    // 4. EVACUATION CANDIDATE SITES LAYER (Real candidate sites with pins)
     // -------------------------------------------------------------------------
-    const targetBounds = (floodBounds && floodBounds.isValid()) ? floodBounds : fallbackBounds;
+    if (evacuLayerRef.current) {
+      try {
+        layerControlRef.current?.removeLayer(evacuLayerRef.current);
+        map.removeLayer(evacuLayerRef.current);
+      } catch (_) {}
+      evacuLayerRef.current = null;
+    }
 
-    if (targetBounds && targetBounds.isValid()) {
-      lastAnalysisBoundsRef.current = targetBounds;
+    if (evacuationCandidates && evacuationCandidates.length > 0) {
+      const group = L.layerGroup();
+
+      evacuationCandidates.forEach((c) => {
+        if (c.lat == null || c.lon == null) return;
+
+        const isSelected =
+          (selectedFeature?.type === 'evac' || selectedFeature?.type === 'evacuation') &&
+          selectedFeature?.name?.toLowerCase().trim() === c.name?.toLowerCase().trim();
+
+        if (isSelected) {
+          setTimeout(() => {
+            try {
+              marker.openPopup();
+            } catch (_) {}
+          }, 1300);
+        }
+
+        const icon = L.divIcon({
+          className: 'custom-evac-marker-wrapper',
+          html: (
+            `<div class="custom-evac-pin ${isSelected ? 'selected-pin' : ''}">` +
+              '<span>✓</span>' +
+            '</div>'
+          ),
+          iconSize: [22, 22],
+          iconAnchor: [11, 11],
+          popupAnchor: [0, -10],
+        });
+
+        const marker = L.marker([c.lat, c.lon], { icon });
+
+        marker.on('click', () => {
+          if (onSelectFeature) {
+            onSelectFeature({ type: 'evac', name: c.name, data: c });
+          }
+        });
+
+        const distStr = c.distance_to_flood_km != null ? `${c.distance_to_flood_km.toFixed(2)} km` : 'Outside Flood Zone';
+        const elevStr = c.elevation_m != null ? `${c.elevation_m.toFixed(1)} m (DEM)` : null;
+        const coordsStr = `${c.lat.toFixed(4)}°N, ${c.lon.toFixed(4)}°E`;
+
+        marker.bindPopup(
+          '<div class="gis-popup evac-popup">' +
+            '<div class="gis-popup-header">' +
+              `<div class="gis-popup-title">${c.name}</div>` +
+              `<span class="gis-popup-badge badge-green">${c.type}</span>` +
+            '</div>' +
+            '<div class="gis-popup-body">' +
+              '<div class="gis-popup-row">' +
+                '<span class="gis-popup-label">Distance to Flood:</span>' +
+                `<span class="gis-popup-val highlight-green">${distStr}</span>` +
+              '</div>' +
+              (elevStr
+                ? '<div class="gis-popup-row">' +
+                    '<span class="gis-popup-label">Elevation:</span>' +
+                    `<span class="gis-popup-val">${elevStr}</span>` +
+                  '</div>'
+                : '') +
+              '<div class="gis-popup-row">' +
+                '<span class="gis-popup-label">Coordinates:</span>' +
+                `<span class="gis-popup-val font-mono" style="font-size:11px">${coordsStr}</span>` +
+              '</div>' +
+              '<div class="gis-popup-footnote alert-box-warning">' +
+                '<b>CANDIDATE SITE ONLY:</b> Requires on-ground physical inspection. NOT a verified shelter.' +
+              '</div>' +
+            '</div>' +
+          '</div>',
+          { maxWidth: 280 }
+        );
+
+        group.addLayer(marker);
+
+        const pointBounds = L.latLngBounds([L.latLng(c.lat, c.lon), L.latLng(c.lat, c.lon)]);
+        combinedBounds = combinedBounds ? combinedBounds.extend(pointBounds) : pointBounds;
+      });
+
+      group.addTo(map);
+      evacuLayerRef.current = group;
+      layerControlRef.current?.addOverlay(group, 'Evacuation Sites');
+    }
+
+    // -------------------------------------------------------------------------
+    // 5. FIT / FLY BOUNDS SMOOTHLY TO DETECTED EXTENT
+    // -------------------------------------------------------------------------
+    if (combinedBounds && combinedBounds.isValid()) {
+      lastAnalysisBoundsRef.current = combinedBounds;
+
       setTimeout(() => {
         try {
           map.invalidateSize();
-          map.flyToBounds(targetBounds, { padding: [35, 35], maxZoom: 15, duration: 1.2 });
+          if (skipAnimation) {
+            map.fitBounds(combinedBounds, { padding: [50, 50], maxZoom: 14 });
+          } else {
+            map.flyToBounds(combinedBounds, {
+              padding: [50, 50],
+              maxZoom: 14,
+              duration: 1.2,
+            });
+          }
         } catch (_) {
           try {
-            map.fitBounds(targetBounds, { padding: [30, 30], maxZoom: 15 });
+            map.fitBounds(combinedBounds, { padding: [40, 40], maxZoom: 14 });
           } catch (e) {}
         }
       }, 50);
@@ -456,37 +545,35 @@ export default function MapViewer({
       map.invalidateSize();
     }
   }, [
-    mode,
     floodGeoJSON,
     floodMetrics,
-    centroid,
-    populationGeoJSON,
-    exposedPopulation,
-    buildingsGeoJSON,
-    affectedBuildings,
     affectedVillagesGeoJSON,
     affectedRoadsGeoJSON,
     evacuationCandidates,
     selectedFeature,
     onSelectFeature,
+    skipAnimation,
   ]);
 
   const hasData =
     (floodGeoJSON && floodGeoJSON.features && floodGeoJSON.features.length > 0) ||
-    (affectedVillagesGeoJSON && affectedVillagesGeoJSON.features && affectedVillagesGeoJSON.features.length > 0);
+    (affectedVillagesGeoJSON && affectedVillagesGeoJSON.features && affectedVillagesGeoJSON.features.length > 0) ||
+    (affectedRoadsGeoJSON && affectedRoadsGeoJSON.features && affectedRoadsGeoJSON.features.length > 0) ||
+    (evacuationCandidates && evacuationCandidates.length > 0);
 
   return (
     <div className={`map-wrapper ${isFullscreen ? 'fullscreen' : ''}`}>
       {!hasData && (
         <div className="map-no-data">
+          <Satellite size={40} color="#38bdf8" className="map-no-data-icon" />
           <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.95rem' }}>
-            Interactive Disaster Analysis Map
+            Interactive GIS Flood Analysis Map
           </div>
-          <span>Upload pre & post satellite GeoTIFFs and run Flood Analysis to view spatial results.</span>
+          <span>Upload pre & post satellite GeoTIFFs and click Run Flood Analysis to inspect spatial results.</span>
         </div>
       )}
 
-      {/* Main Map Container */}
+      {/* Main Leaflet Map Container */}
       <div ref={mapContainerRef} className="leaflet-map-container" />
 
       {/* Floating Map Toolbar Controls */}
@@ -495,9 +582,10 @@ export default function MapViewer({
           <button
             className="map-tool-btn"
             onClick={handleResetBounds}
-            title="Fit map tightly to flood bounds"
-            aria-label="Fit to flood extent"
+            title="Fit to analysis extent"
+            aria-label="Fit to analysis extent"
           >
+            <Focus size={15} />
             <span className="btn-text">Reset Extent</span>
           </button>
         )}
@@ -507,11 +595,12 @@ export default function MapViewer({
           title={isFullscreen ? 'Exit Fullscreen' : 'View Fullscreen'}
           aria-label="Toggle Fullscreen"
         >
-          {isFullscreen ? '✕ Exit' : 'Fullscreen'}
+          {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          <span className="btn-text">{isFullscreen ? 'Exit' : 'Fullscreen'}</span>
         </button>
       </div>
 
-      {/* Active Selection Banner */}
+      {/* Active Selection Indicator */}
       {selectedFeature && (
         <div className="map-selection-banner">
           <span>Selected {selectedFeature.type === 'village' ? 'Village' : 'Site'}: <b>{selectedFeature.name}</b></span>
@@ -520,45 +609,8 @@ export default function MapViewer({
             onClick={() => onSelectFeature && onSelectFeature(null)}
             title="Clear selection"
           >
-            ✕
+            <X size={14} />
           </button>
-        </div>
-      )}
-
-      {/* Floating Map Legend Overlay */}
-      {hasData && (
-        <div className="map-legend-overlay">
-          <div className="legend-title">{mode === 'overview' ? 'Flood Overview Layers' : 'Impact Analysis Layers'}</div>
-          <div className="legend-items">
-            <div className="legend-item">
-              <span className="legend-color-box flood-box"></span>
-              <span className="legend-label">🌊 Flooded Area</span>
-            </div>
-            <div className="legend-item">
-              <span className="legend-color-box building-box"></span>
-              <span className="legend-label">🏘️ Affected Villages</span>
-            </div>
-            {mode === 'impact' && (
-              <>
-                <div className="legend-item">
-                  <span className="legend-icon">👥</span>
-                  <span className="legend-label">People Exposed</span>
-                </div>
-                <div className="legend-item">
-                  <span className="legend-color-box building-box"></span>
-                  <span className="legend-label">🏠 Affected Buildings</span>
-                </div>
-                <div className="legend-item">
-                  <span className="legend-line road-line"></span>
-                  <span className="legend-label">🛣️ Affected Roads</span>
-                </div>
-              </>
-            )}
-            <div className="legend-item">
-              <span className="legend-icon">📍</span>
-              <span className="legend-label">Flood Centroid</span>
-            </div>
-          </div>
         </div>
       )}
     </div>

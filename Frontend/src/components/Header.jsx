@@ -9,8 +9,6 @@ const STATUS_LABELS = {
 };
 
 const TAB_TITLES = {
-  image_study: 'Flood Image Study',
-  image_study_result: 'Flood Analysis Result',
   map: 'Map Explorer',
   impact: 'Impact & Vulnerability Analysis',
   evacuation: 'Evacuation Site Screening',

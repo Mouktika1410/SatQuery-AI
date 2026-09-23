@@ -120,8 +120,18 @@ class FloodDetectionService:
 
         try:
             with rasterio.open(pre_path) as pre_ds, rasterio.open(post_path) as post_ds:
+                # Determine if input is Sentinel-1 SAR imagery
+                is_sar_pre, _, pre_pols = self._is_sar_dataset(pre_ds)
+                is_sar_post, _, post_pols = self._is_sar_dataset(post_ds)
+                is_sar = is_sar_pre or is_sar_post or (method == "sar")
+
                 # Select detection method
-                if method == "ndwi" or (
+                if method == "sar" or (method == "auto" and is_sar and pre_ds.count <= 2):
+                    mask, method_used, step_notes = self._sar_detection(
+                        pre_ds, post_ds, opts
+                    )
+                    notes.extend(step_notes)
+                elif method == "ndwi" or (
                     method == "auto"
                     and pre_ds.count >= 3
                     and post_ds.count >= 3
@@ -188,6 +198,239 @@ class FloodDetectionService:
         except Exception as exc:
             logger.exception("Flood detection failed")
             return self._error_result(str(exc))
+
+    # ------------------------------------------------------------------
+    # Sentinel-1 SAR Dataset Identification
+    # ------------------------------------------------------------------
+
+    def _is_sar_dataset(self, ds: Any) -> Tuple[bool, Optional[str], List[str]]:
+        """
+        Detect if a dataset has Sentinel-1 SAR characteristics.
+        Returns (is_sar, sensor_name, polarizations_list).
+        """
+        pols: List[str] = []
+        is_sar = False
+        sensor = None
+
+        # 1. Band descriptions
+        if ds.descriptions:
+            for desc in ds.descriptions:
+                if desc:
+                    d_upper = desc.upper()
+                    for p in ["VV", "VH", "HH", "HV"]:
+                        if p in d_upper and p not in pols:
+                            pols.append(p)
+                    if any(k in d_upper for k in ["SIGMA0", "GAMMA0", "SAR", "SENTINEL-1", "S1", "BACKSCATTER", "DB"]):
+                        is_sar = True
+
+        # 2. Metadata tags
+        try:
+            tags = ds.tags()
+            tag_str = " ".join(f"{k}:{v}" for k, v in tags.items()).upper()
+            if any(k in tag_str for k in ["SENTINEL-1", "S1A", "S1B", "SAR", "C-SAR", "IW_GRD", "IW", "EW"]):
+                is_sar = True
+                sensor = "Sentinel-1 SAR"
+            for p in ["VV", "VH", "HH", "HV"]:
+                if p in tag_str and p not in pols:
+                    pols.append(p)
+        except Exception:
+            pass
+
+        # 3. Filename
+        fname = os.path.basename(getattr(ds, "name", "") or "").upper()
+        if any(k in fname for k in ["S1A_", "S1B_", "SENTINEL1", "SENTINEL-1", "S1_"]):
+            is_sar = True
+            sensor = "Sentinel-1 SAR"
+        for p in ["VV", "VH", "HH", "HV"]:
+            if f"_{p}" in fname or f"-{p}" in fname or f".{p}." in fname or f"_{p}." in fname:
+                if p not in pols:
+                    pols.append(p)
+
+        # 4. Pixel dynamic range check for 1-2 band rasters
+        if ds.count <= 2:
+            if pols:
+                is_sar = True
+            try:
+                sub_h = min(ds.height, 32)
+                sub_w = min(ds.width, 32)
+                sample = ds.read(1, out_shape=(sub_h, sub_w)).astype(np.float32)
+                valid = np.isfinite(sample)
+                if ds.nodata is not None:
+                    valid &= (sample != ds.nodata)
+                if np.any(valid):
+                    valid_vals = sample[valid]
+                    v_min = float(np.min(valid_vals))
+                    v_max = float(np.max(valid_vals))
+                    v_med = float(np.median(valid_vals))
+                    # Decibel values: backscatter is typically between -35 dB and +5 dB (negative median)
+                    if -50.0 <= v_min <= -1.0 and v_med < 0.0 and v_max <= 25.0:
+                        is_sar = True
+                        if not pols:
+                            pols.append("VV")
+            except Exception:
+                pass
+
+        if is_sar and not sensor:
+            sensor = "Sentinel-1 SAR"
+
+        return is_sar, sensor, pols
+
+    # ------------------------------------------------------------------
+    # Sentinel-1 SAR Flood Detection
+    # ------------------------------------------------------------------
+
+    def _sar_detection(
+        self,
+        pre_ds: Any,
+        post_ds: Any,
+        opts: Dict[str, Any],
+    ) -> Tuple[Any, str, List[str]]:
+        """
+        Sentinel-1 SAR flood change detection based on radar backscatter drop.
+
+        Calm floodwater acts as a specular reflector, scattering microwave pulses away
+        from the radar antenna and producing a marked decrease in received backscatter.
+        """
+        notes: List[str] = []
+
+        # 1. Polarization selection
+        target_pol = str(opts.get("sar_polarization", "auto")).upper().strip()
+        pre_band_idx = 1
+        post_band_idx = 1
+        pol_used = "VV"
+
+        def find_band_for_pol(ds: Any, pol: str) -> int:
+            if ds.descriptions:
+                for idx, desc in enumerate(ds.descriptions, start=1):
+                    if desc and pol in desc.upper():
+                        return idx
+            if pol == "VH" and ds.count >= 2:
+                return 2
+            return 1
+
+        if target_pol in ("VV", "VH"):
+            pre_band_idx = find_band_for_pol(pre_ds, target_pol)
+            post_band_idx = find_band_for_pol(post_ds, target_pol)
+            pol_used = target_pol
+        else:
+            # Auto: look for VV first, then VH
+            if pre_ds.descriptions and any("VV" in (d or "").upper() for d in pre_ds.descriptions):
+                pre_band_idx = find_band_for_pol(pre_ds, "VV")
+                post_band_idx = find_band_for_pol(post_ds, "VV")
+                pol_used = "VV"
+            elif pre_ds.count >= 2 and target_pol == "VH":
+                pre_band_idx = 2
+                post_band_idx = 2
+                pol_used = "VH"
+            else:
+                pre_band_idx = 1
+                post_band_idx = 1
+                pol_used = "VV"
+
+        notes.append(
+            f"Sentinel-1 SAR detection: polarization {pol_used} selected "
+            f"(pre_band={pre_band_idx}, post_band={post_band_idx})."
+        )
+
+        # 2. Read and reproject if needed
+        pre_raw = pre_ds.read(pre_band_idx).astype(np.float32)
+
+        if (
+            pre_ds.crs != post_ds.crs
+            or pre_ds.width != post_ds.width
+            or pre_ds.height != post_ds.height
+            or pre_ds.transform != post_ds.transform
+        ):
+            post_raw = np.zeros_like(pre_raw)
+            reproject(
+                source=rasterio.band(post_ds, post_band_idx),
+                destination=post_raw,
+                src_transform=post_ds.transform,
+                src_crs=post_ds.crs,
+                dst_transform=pre_ds.transform,
+                dst_crs=pre_ds.crs,
+                resampling=Resampling.bilinear,
+            )
+            notes.append(
+                f"Post-image reprojected to match pre-image grid ({post_ds.crs} -> {pre_ds.crs})."
+            )
+        else:
+            post_raw = post_ds.read(post_band_idx).astype(np.float32)
+
+        # 3. Nodata and border masking
+        valid_mask = np.isfinite(pre_raw) & np.isfinite(post_raw)
+        if pre_ds.nodata is not None:
+            valid_mask &= (pre_raw != pre_ds.nodata)
+        if post_ds.nodata is not None:
+            valid_mask &= (post_raw != post_ds.nodata)
+
+        valid_pre = pre_raw[valid_mask]
+        valid_post = post_raw[valid_mask]
+        if valid_pre.size == 0 or valid_post.size == 0:
+            notes.append("No valid overlapping pixels found for SAR analysis.")
+            return np.zeros(pre_raw.shape, dtype=np.uint8), "sar+otsu", notes
+
+        # 4. Decibel (dB) Conversion
+        is_db = (float(np.median(valid_pre)) < 0.0) or (float(np.percentile(valid_pre, 10)) < -2.0)
+
+        if is_db:
+            notes.append("SAR backscatter data detected in calibrated decibels (dB).")
+            valid_mask &= (pre_raw > -50.0) & (post_raw > -50.0) & (pre_raw < 30.0) & (post_raw < 30.0)
+            pre_db = pre_raw.copy()
+            post_db = post_raw.copy()
+        else:
+            notes.append("Linear SAR data converted to decibel scale (dB).")
+            valid_mask &= (pre_raw > 1e-7) & (post_raw > 1e-7)
+            max_val = max(float(np.max(valid_pre)), float(np.max(valid_post)))
+            if max_val > 10.0:
+                pre_db = 20.0 * np.log10(np.maximum(pre_raw, 1e-4))
+                post_db = 20.0 * np.log10(np.maximum(post_raw, 1e-4))
+            else:
+                pre_db = 10.0 * np.log10(np.maximum(pre_raw, 1e-7))
+                post_db = 10.0 * np.log10(np.maximum(post_raw, 1e-7))
+
+        # 5. Speckle noise filtering
+        if SCIPY_AVAILABLE:
+            med_pre = float(np.median(pre_db[valid_mask])) if np.any(valid_mask) else 0.0
+            med_post = float(np.median(post_db[valid_mask])) if np.any(valid_mask) else 0.0
+
+            pre_filled = np.where(valid_mask, pre_db, med_pre)
+            post_filled = np.where(valid_mask, post_db, med_post)
+
+            pre_smooth = ndi.median_filter(pre_filled, size=3)
+            post_smooth = ndi.median_filter(post_filled, size=3)
+            notes.append("Speckle filtering applied (3x3 median filter).")
+        else:
+            pre_smooth = pre_db
+            post_smooth = post_db
+
+        # 6. Backscatter drop calculation
+        backscatter_drop = pre_smooth - post_smooth
+        backscatter_drop[~valid_mask] = 0.0
+
+        user_thresh = opts.get("threshold")
+        if user_thresh is not None:
+            thresh = float(user_thresh)
+            notes.append(f"Using specified backscatter drop threshold: {thresh:.2f} dB")
+        else:
+            drop_data = np.maximum(backscatter_drop[valid_mask], 0.0)
+            if drop_data.size > 50 and np.any(drop_data > 0):
+                otsu_drop = self._otsu_threshold(drop_data)
+                thresh = max(float(otsu_drop), 3.0)
+                notes.append(f"Otsu auto-threshold for backscatter drop: {thresh:.2f} dB")
+            else:
+                thresh = 3.5
+                notes.append(f"Empirical SAR backscatter drop threshold applied: {thresh:.2f} dB")
+
+        flood_mask = ((backscatter_drop > thresh) & valid_mask).astype(np.uint8)
+
+        # 7. Water ceiling check in calibrated dB scale
+        if is_db and np.any(valid_mask):
+            water_ceiling = float(opts.get("sar_water_ceiling_db", -11.0))
+            flood_mask &= (post_smooth <= water_ceiling).astype(np.uint8)
+            notes.append(f"Water backscatter ceiling applied (post_flood <= {water_ceiling:.1f} dB).")
+
+        return flood_mask, "sar+otsu", notes
 
     # ------------------------------------------------------------------
     # NDWI Detection

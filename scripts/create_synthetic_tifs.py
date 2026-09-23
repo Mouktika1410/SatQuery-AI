@@ -8,11 +8,11 @@ import os
 import struct
 import numpy as np
 
-# Bounding box coordinates (WGS84)
-# Center: 72.9° E, 19.0° N (Maharashtra/Gujarat region)
-MIN_LON, MAX_LON = 72.80, 73.00
-MIN_LAT, MAX_LAT = 18.90, 19.10
-WIDTH, HEIGHT = 200, 200
+# Bounding box coordinates (WGS84) matching Kerala Sentinel-1 test imagery
+# Center approx: 76.46° E, 9.68° N (Kottayam / Vembanad / Kuttanad, Kerala)
+MIN_LON, MAX_LON = 76.24989963134911, 76.55083525152915
+MIN_LAT, MAX_LAT = 9.34966547711598, 9.750314093833287
+WIDTH, HEIGHT = 335, 446
 
 
 def create_geotiff_pure_python(filename: str, array_2d: np.ndarray, min_lon: float, min_lat: float, max_lon: float, max_lat: float) -> str:

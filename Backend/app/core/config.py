@@ -112,6 +112,60 @@ class Settings(BaseModel):
                 return val.strip()
         return None
 
+    # Copernicus Data Space Ecosystem (CDSE) configuration
+    @property
+    def COPERNICUS_USERNAME(self) -> Optional[str]:
+        """Resolve Copernicus Data Space username from environment."""
+        _load_env_file()
+        for env_var in ("COPERNICUS_USERNAME", "CDSE_USERNAME", "COPERNICUS_USER"):
+            val = os.getenv(env_var)
+            if val and val.strip():
+                return val.strip()
+        return None
+
+    @property
+    def COPERNICUS_PASSWORD(self) -> Optional[str]:
+        """Resolve Copernicus Data Space password from environment."""
+        _load_env_file()
+        for env_var in ("COPERNICUS_PASSWORD", "CDSE_PASSWORD", "COPERNICUS_PASS"):
+            val = os.getenv(env_var)
+            if val and val.strip():
+                return val.strip()
+        return None
+
+    @property
+    def COPERNICUS_CLIENT_ID(self) -> Optional[str]:
+        """Resolve Copernicus Data Space OAuth2 Client ID from environment."""
+        _load_env_file()
+        for env_var in ("COPERNICUS_CLIENT_ID", "CDSE_CLIENT_ID"):
+            val = os.getenv(env_var)
+            if val and val.strip():
+                return val.strip()
+        return None
+
+    @property
+    def COPERNICUS_CLIENT_SECRET(self) -> Optional[str]:
+        """Resolve Copernicus Data Space OAuth2 Client Secret from environment."""
+        _load_env_file()
+        for env_var in ("COPERNICUS_CLIENT_SECRET", "CDSE_CLIENT_SECRET"):
+            val = os.getenv(env_var)
+            if val and val.strip():
+                return val.strip()
+        return None
+
+    COPERNICUS_TOKEN_URL: str = (
+        "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
+    )
+    COPERNICUS_CATALOGUE_URL: str = (
+        "https://catalogue.dataspace.copernicus.eu/odata/v1/Products"
+    )
+    COPERNICUS_ZIPPER_URL: str = (
+        "https://zipper.dataspace.copernicus.eu/odata/v1/Products"
+    )
+    COPERNICUS_STAC_URL: str = (
+        "https://stac.dataspace.copernicus.eu/v1/search"
+    )
+
     # Data directory configuration
     DATA_DIR: str = Field(
         default_factory=_resolve_data_dir
@@ -167,6 +221,12 @@ class Settings(BaseModel):
     @property
     def data_dem_dir(self) -> str:
         return os.path.join(self.DATA_DIR, "dem")
+
+    @property
+    def copernicus_cache_dir(self) -> str:
+        d = os.path.join(self.DATA_DIR, "copernicus_cache")
+        os.makedirs(d, exist_ok=True)
+        return d
 
 
 settings = Settings()

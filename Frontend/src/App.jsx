@@ -8,9 +8,7 @@ import StatusIndicator from './components/StatusIndicator';
 import MetricsPanel from './components/MetricsPanel';
 import MapViewer from './components/MapViewer';
 import AiAssistant from './components/AiAssistant';
-import ImageStudyUpload from './components/ImageStudyUpload';
-import ImageStudyResult from './components/ImageStudyResult';
-import { runFullPipeline, runImageStudy } from './services/api';
+import { runFullPipeline } from './services/api';
 import {
   BarChart2,
   Upload,
@@ -37,9 +35,6 @@ export default function App() {
   const [pipelineResult, setPipelineResult] = useState(null);
   const [error, setError] = useState(null);
 
-  const [imageStudyResult, setImageStudyResult] = useState(null);
-  const [imageStudyState, setImageStudyState] = useState('idle');
-
   const [uploadedFiles, setUploadedFiles] = useState({ pre: null, post: null });
   const [selectedFeature, setSelectedFeature] = useState(null);
 
@@ -58,30 +53,11 @@ export default function App() {
       setPipelineResult(result);
       setSessionId(result.session_id);
       setAnalysisState('complete');
-      // Trigger cinematic remote-sensing satellite transition sequence
+      // Stage 2: Show analysis/detection transition from previous sample-data version
       setShowTransition(true);
     } catch (err) {
       const msg = err.message || 'Analysis failed. Check the backend is running.';
       setError(msg);
-      setAnalysisState('error');
-    }
-  }, []);
-
-  const handleRunImageStudy = useCallback(async (preFile, postFile) => {
-    setImageStudyState('running');
-    setAnalysisState('running');
-    setError(null);
-
-    try {
-      const result = await runImageStudy(preFile, postFile);
-      setImageStudyResult(result);
-      setImageStudyState('complete');
-      setAnalysisState('complete');
-      setActiveTab('image_study_result');
-    } catch (err) {
-      const msg = err.message || 'Image Study analysis failed.';
-      setError(msg);
-      setImageStudyState('error');
       setAnalysisState('error');
     }
   }, []);
@@ -160,30 +136,13 @@ export default function App() {
         />
 
         <main className="workspace-main">
-          {/* TAB 0A: FLOOD IMAGE STUDY (Upload) */}
-          {activeTab === 'image_study' && (
-            <div className="upload-view-container">
-              <ImageStudyUpload
-                onRunImageStudy={handleRunImageStudy}
-                isRunning={imageStudyState === 'running'}
-              />
-            </div>
-          )}
-
-          {/* TAB 0B: FLOOD ANALYSIS RESULT (Image Study Map View) */}
-          {activeTab === 'image_study_result' && (
-            <div className="upload-view-container">
-              <ImageStudyResult
-                result={imageStudyResult}
-                onBackToUpload={() => setActiveTab('image_study')}
-              />
-            </div>
-          )}
-
           {/* TAB 1: MAP EXPLORER (Hero Full View) */}
           {activeTab === 'map' && (
             <div className="map-view-hero">
               <MapViewer
+                pipelineResult={pipelineResult}
+                preFile={uploadedFiles.pre}
+                postFile={uploadedFiles.post}
                 floodGeoJSON={floodGeoJSON}
                 floodMetrics={floodMetrics}
                 evacuationCandidates={evacuationCandidates}
@@ -193,7 +152,6 @@ export default function App() {
                 priorityScores={priorityScores}
                 selectedFeature={selectedFeature}
                 onSelectFeature={setSelectedFeature}
-                onReplaySequence={hasData ? () => setShowTransition(true) : null}
               />
 
               {/* Floating Quick Drawer on Map */}
@@ -248,14 +206,6 @@ export default function App() {
                         <div className="drawer-action-row">
                           <button
                             className="btn-ghost-sm"
-                            onClick={() => setShowTransition(true)}
-                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-                          >
-                            <Play size={13} />
-                            <span>Replay Detection Transition</span>
-                          </button>
-                          <button
-                            className="btn-ghost-sm"
                             onClick={() => setActiveTab('impact')}
                           >
                             Full Impact Metrics →
@@ -306,6 +256,9 @@ export default function App() {
               {/* Auxiliary Map Preview */}
               <div className="impact-map-side">
                 <MapViewer
+                  pipelineResult={pipelineResult}
+                  preFile={uploadedFiles.pre}
+                  postFile={uploadedFiles.post}
                   floodGeoJSON={floodGeoJSON}
                   floodMetrics={floodMetrics}
                   evacuationCandidates={evacuationCandidates}
@@ -315,7 +268,7 @@ export default function App() {
                   priorityScores={priorityScores}
                   selectedFeature={selectedFeature}
                   onSelectFeature={setSelectedFeature}
-                  onReplaySequence={hasData ? () => setShowTransition(true) : null}
+                  skipAnimation={true}
                 />
               </div>
             </div>
@@ -353,7 +306,9 @@ export default function App() {
                             {evacuationCandidates.map((c, i) => (
                               <tr
                                 key={i}
-                                className={selectedFeature?.type === 'evac' && selectedFeature?.name === c.name ? 'row-selected' : ''}
+                                className={(selectedFeature?.type === 'evac' || selectedFeature?.type === 'evacuation') && selectedFeature?.name === c.name ? 'row-selected' : ''}
+                                onClick={() => setSelectedFeature({ type: 'evac', name: c.name, data: c })}
+                                style={{ cursor: 'pointer' }}
                               >
                                 <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.name}</td>
                                 <td><span className="table-badge badge-green">{c.type}</span></td>
@@ -364,7 +319,8 @@ export default function App() {
                                 <td>
                                   <button
                                     className="btn-ghost-sm"
-                                    onClick={() => {
+                                    onClick={(e) => {
+                                      e.stopPropagation();
                                       setSelectedFeature({ type: 'evac', name: c.name, data: c });
                                       setActiveTab('map');
                                     }}
@@ -399,6 +355,9 @@ export default function App() {
 
               <div className="impact-map-side">
                 <MapViewer
+                  pipelineResult={pipelineResult}
+                  preFile={uploadedFiles.pre}
+                  postFile={uploadedFiles.post}
                   floodGeoJSON={floodGeoJSON}
                   floodMetrics={floodMetrics}
                   evacuationCandidates={evacuationCandidates}
@@ -408,7 +367,6 @@ export default function App() {
                   priorityScores={priorityScores}
                   selectedFeature={selectedFeature}
                   onSelectFeature={setSelectedFeature}
-                  onReplaySequence={hasData ? () => setShowTransition(true) : null}
                 />
               </div>
             </div>

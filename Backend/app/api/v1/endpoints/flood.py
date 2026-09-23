@@ -126,6 +126,8 @@ async def detect_flood(
     ndwi_green_band: int = Form(2),
     ndwi_nir_band: int = Form(4),
     morphology_iterations: int = Form(2),
+    threshold: Optional[float] = Form(None),
+    sar_polarization: Optional[str] = Form("auto"),
 ) -> FloodDetectionResult:
     """
     Run deterministic flood detection on uploaded GeoTIFF pair.
@@ -143,6 +145,8 @@ async def detect_flood(
         "ndwi_green_band": ndwi_green_band,
         "ndwi_nir_band": ndwi_nir_band,
         "morphology_iterations": morphology_iterations,
+        "threshold": threshold,
+        "sar_polarization": sar_polarization,
     }
 
     result = FloodDetectionService().detect(pre_path, post_path, options)
@@ -414,6 +418,8 @@ async def run_full_pipeline(
     method: str = Form("auto"),
     simplify_tolerance: float = Form(0.0001),
     buffer_m: float = Form(100.0),
+    threshold: Optional[float] = Form(None),
+    sar_polarization: Optional[str] = Form("auto"),
 ) -> PipelineResult:
     """
     Execute the complete flood analysis pipeline in one request:
@@ -469,6 +475,8 @@ async def run_full_pipeline(
         options = {
             "method": method,
             "morphology_iterations": 2,
+            "threshold": threshold,
+            "sar_polarization": sar_polarization,
         }
         det_svc = FloodDetectionService()
         detection_result_raw = det_svc.detect(pre_path, post_path, options)

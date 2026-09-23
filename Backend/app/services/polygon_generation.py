@@ -122,8 +122,19 @@ class PolygonGenerationService:
 
             # 3. If MultiPolygon, close small gaps or select the single largest continuous component
             if isinstance(unified_geom, MultiPolygon):
+                # Adaptive buffer distance based on CRS units (degrees vs metres)
+                is_geo = True
+                try:
+                    if crs_wkt and PYPROJ_AVAILABLE:
+                        c = PyProjCRS.from_user_input(crs_wkt)
+                        if c and not c.is_geographic:
+                            is_geo = False
+                except Exception:
+                    pass
+                closing_dist = 0.002 if is_geo else 25.0
+
                 # Try morphological closing to bridge minor gaps
-                merged_geom = unified_geom.buffer(0.002).buffer(-0.002)
+                merged_geom = unified_geom.buffer(closing_dist).buffer(-closing_dist)
                 if isinstance(merged_geom, Polygon) and not merged_geom.is_empty:
                     unified_geom = merged_geom
                 else:

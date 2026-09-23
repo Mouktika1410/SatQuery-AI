@@ -885,6 +885,108 @@ body {
   height: 100%;
 }
 
+/* Flood Polygon Dynamic Creation & Drawing Animation */
+@keyframes floodPathDraw {
+  0% {
+    stroke-dasharray: 4000;
+    stroke-dashoffset: 4000;
+    fill-opacity: 0;
+    stroke: #00ffff;
+    filter: drop-shadow(0 0 8px #00ffff);
+  }
+  50% {
+    stroke-dashoffset: 800;
+    fill-opacity: 0.15;
+    stroke: #00e5ff;
+    filter: drop-shadow(0 0 16px #00e5ff) drop-shadow(0 0 30px rgba(2, 132, 199, 0.6));
+  }
+  100% {
+    stroke-dashoffset: 0;
+    fill-opacity: 0.62;
+    stroke: #00e5ff;
+    filter: drop-shadow(0 0 6px rgba(0, 229, 255, 0.75)) drop-shadow(0 0 14px rgba(2, 132, 199, 0.45));
+  }
+}
+
+.flood-polygon-animating {
+  animation: floodPathDraw 2.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+  stroke-linejoin: round !important;
+  stroke-linecap: round !important;
+}
+
+/* Flood Polygon Natural Organic Presentation with Vivid Cyan Outline & Drop-Shadow */
+.flood-polygon-path {
+  filter: drop-shadow(0 0 6px rgba(0, 229, 255, 0.75)) drop-shadow(0 0 14px rgba(2, 132, 199, 0.45));
+  stroke-linejoin: round !important;
+  stroke-linecap: round !important;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.flood-polygon-path:hover {
+  filter: drop-shadow(0 0 12px rgba(0, 255, 255, 0.95)) drop-shadow(0 0 24px rgba(56, 189, 248, 0.7));
+}
+
+/* GIS Multi-Stage Flight HUD Telemetry Badge */
+.gis-flight-hud-pill {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10, 17, 32, 0.88);
+  border: 1px solid rgba(56, 189, 248, 0.55);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 15px rgba(56, 189, 248, 0.25);
+  border-radius: 24px;
+  padding: 6px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 1000;
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+  animation: hudPillFadeIn 0.3s ease-out;
+}
+
+.hud-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #00e5ff;
+  box-shadow: 0 0 8px #00e5ff;
+  animation: hudPulse 1.2s infinite ease-in-out;
+}
+
+.hud-check-dot {
+  color: #10b981;
+  font-weight: 700;
+  font-size: 11px;
+}
+
+.hud-stage-label {
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: #f1f5f9;
+  font-weight: 600;
+}
+
+.hud-stage-tag {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 0.65rem;
+}
+
+@keyframes hudPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.6; }
+}
+
+@keyframes hudPillFadeIn {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
 .map-action-toolbar {
   position: absolute;
   top: 12px;
@@ -3302,53 +3404,254 @@ body {
   border-top: 1px solid rgba(148, 163, 184, 0.12);
 }
 
-/* Video Card Modal Specifics */
-.video-card {
-  max-width: 760px;
+/* Video Modal Specifics */
+.cinematic-video-modal-card {
+  max-width: 1040px;
+  width: 95vw;
+  background: #0b1329;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 14px;
+  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.95), 0 0 45px rgba(56, 189, 248, 0.2);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: modalZoomIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalZoomIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.video-modal-header {
+  padding: 16px 22px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.95), rgba(11, 19, 41, 0.95));
+  border-bottom: 1px solid rgba(56, 189, 248, 0.15);
+}
+
+.video-badge {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.28);
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-left: 8px;
 }
 
 .video-player-container {
-  padding: 20px;
-}
-
-.video-mock-screen {
-  background: #020617;
-  border: 1px stroke rgba(56, 189, 248, 0.2);
-  border-radius: 8px;
-  height: 320px;
+  padding: 0;
+  background: #000000;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 72vh;
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
-  overflow: hidden;
 }
 
-.video-center-play {
+.cinematic-video-element {
+  width: 100%;
+  height: 100%;
+  max-height: 72vh;
+  object-fit: contain;
+  display: block;
+  background: #000000;
+  outline: none;
+  accent-color: #38bdf8;
+}
+
+.video-modal-footer {
+  padding: 14px 22px;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  text-align: center;
-  padding: 24px;
-  max-width: 480px;
+  justify-content: space-between;
+  background: rgba(11, 19, 41, 0.95);
+  border-top: 1px solid rgba(56, 189, 248, 0.15);
 }
 
-.pulse-icon {
-  animation: pulse 2s infinite;
-  margin-bottom: 14px;
-}
-
-.video-status-txt {
-  font-size: 0.75rem;
-  color: #38bdf8;
-  letter-spacing: 0.1em;
-  font-weight: 700;
-  margin-bottom: 8px;
-}
-
-.video-desc {
-  font-size: 0.88rem;
+.video-telemetry-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
   color: #94a3b8;
-  line-height: 1.5;
+  letter-spacing: 0.06em;
+}
+
+.video-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 10px #10b981;
+  animation: livePulse 2s infinite;
+}
+
+@keyframes livePulse {
+  0% { transform: scale(0.95); opacity: 0.7; }
+  50% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.7; }
+}
+
+.video-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Custom Video Player Toolbar Controls */
+.video-custom-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  background: rgba(10, 16, 32, 0.98);
+  border-top: 1px solid rgba(56, 189, 248, 0.18);
+}
+
+.video-ctrl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #f8fafc;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.video-ctrl-btn:hover {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: rgba(56, 189, 248, 0.55);
+  color: #38bdf8;
+  transform: translateY(-1px);
+}
+
+.video-ctrl-btn:active {
+  transform: translateY(0);
+}
+
+.ctrl-btn-text {
+  font-size: 0.78rem;
+  font-family: inherit;
+}
+
+.video-timeline-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 140px;
+}
+
+.video-time-display {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  min-width: 36px;
+  text-align: center;
+  user-select: none;
+}
+
+.video-seek-slider {
+  flex: 1;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(51, 65, 85, 0.8);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+
+.video-seek-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.7);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.video-seek-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+}
+
+.video-volume-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.video-volume-slider {
+  width: 75px;
+  height: 5px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(51, 65, 85, 0.8);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+
+.video-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #38bdf8;
+  cursor: pointer;
+}
+
+.video-big-play-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  z-index: 2;
+  transition: background 0.2s;
+}
+
+.video-big-play-overlay:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.video-big-play-btn {
+  width: 68px;
+  height: 68px;
+  border-radius: 50%;
+  background: rgba(14, 165, 233, 0.88);
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 25px rgba(56, 189, 248, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.video-big-play-overlay:hover .video-big-play-btn {
+  transform: scale(1.1);
+  background: #0ea5e9;
 }
 
 .hud-lbl { color: var(--text-muted); margin-right: 6px; }
