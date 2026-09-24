@@ -18,8 +18,12 @@ logger = logging.getLogger(__name__)
 
 try:
     import geopandas as gpd
-    from shapely.geometry import Point
+    from shapely.geometry import Point, LineString, MultiLineString
+    from shapely.ops import nearest_points
     from shapely.validation import make_valid
+    import networkx as nx
+    from scipy.spatial import cKDTree
+    import numpy as np
     GEOPANDAS_AVAILABLE = True
 except ImportError:
     GEOPANDAS_AVAILABLE = False
@@ -160,11 +164,77 @@ class EvacuationService:
                         "distance_to_flood_km": distance_km,
                         "elevation_m": elevation_m,
                         "notes": "Candidate accessible site for on-ground verification only. Not a verified shelter.",
+                        "route_geojson": None,
+                        "route_distance_km": None,
+                        "origin_name": None,
                     }
                 )
 
             # Sort by distance to flood (nearest accessible first)
             candidates.sort(key=lambda x: x["distance_to_flood_km"] or 9999.0)
+
+            # Determine route origin relevant to flood analysis
+            origin_name = "Flood Boundary"
+            try:
+                villages_gdf = gis_repo.load_layer("villages") if hasattr(gis_repo, "load_layer") else None
+                if villages_gdf is not None and len(villages_gdf) > 0:
+                    v_reproj = villages_gdf.to_crs(flood_gdf.crs) if villages_gdf.crs != flood_gdf.crs else villages_gdf
+                    inter = gpd.overlay(flood_gdf, v_reproj, how="intersection")
+                    if len(inter) > 0:
+                        inter["calc_area"] = inter.to_crs(metric_crs).geometry.area
+                        best_row = inter.sort_values(by="calc_area", ascending=False).iloc[0]
+                        v_name = best_row.get("name") or best_row.get("NAME")
+                        if v_name and str(v_name) != "nan":
+                            origin_name = f"Flood Boundary ({v_name})"
+            except Exception as exc:
+                logger.debug("Failed to detect primary affected village for route origin: %s", exc)
+
+            # Compute road routing along real road network for candidates
+            try:
+                roads_gdf = gis_repo.load_layer("roads") if hasattr(gis_repo, "load_layer") else None
+                road_graph, road_nodes, road_tree = self._get_or_build_road_graph(roads_gdf)
+
+                if road_graph is not None and road_nodes and road_tree is not None:
+                    for c in candidates:
+                        try:
+                            poi_geom = Point(c["lon"], c["lat"])
+                            nearest_flood_pt, _ = nearest_points(flood_boundary_wgs84, poi_geom)
+
+                            _, orig_idx = road_tree.query([nearest_flood_pt.x, nearest_flood_pt.y])
+                            orig_node = road_nodes[orig_idx]
+
+                            _, tgt_idx = road_tree.query([c["lon"], c["lat"]])
+                            tgt_node = road_nodes[tgt_idx]
+
+                            if nx.has_path(road_graph, orig_node, tgt_node):
+                                path = nx.shortest_path(road_graph, orig_node, tgt_node, weight="weight")
+                                dist_m = nx.shortest_path_length(road_graph, orig_node, tgt_node, weight="weight")
+                                dist_km = round(dist_m / 1000.0, 2)
+
+                                coords = [[round(float(nearest_flood_pt.x), 6), round(float(nearest_flood_pt.y), 6)]]
+                                for n in path:
+                                    coords.append([round(float(n[0]), 6), round(float(n[1]), 6)])
+                                coords.append([round(float(c["lon"]), 6), round(float(c["lat"]), 6)])
+
+                                c["route_geojson"] = {
+                                    "type": "Feature",
+                                    "properties": {
+                                        "destination": c["name"],
+                                        "destination_type": c["type"],
+                                        "origin": origin_name,
+                                        "distance_km": dist_km,
+                                    },
+                                    "geometry": {
+                                        "type": "LineString",
+                                        "coordinates": coords,
+                                    },
+                                }
+                                c["route_distance_km"] = dist_km
+                                c["origin_name"] = origin_name
+                        except Exception as err:
+                            logger.debug("Routing failed for %s: %s", c.get("name"), err)
+            except Exception as exc:
+                logger.error("Road network routing computation failed: %s", exc)
 
             return {
                 "candidates": candidates,
@@ -189,3 +259,127 @@ class EvacuationService:
             if col in row.index and row[col] and str(row[col]) != "nan":
                 return str(row[col]).lower().strip()
         return None
+
+    # Cached road network spatial graph
+    _cached_road_graph = None
+    _cached_road_nodes = None
+    _cached_road_tree = None
+    _cached_roads_count = None
+
+    def _get_or_build_road_graph(self, roads_gdf: Any):
+        """
+        Builds and caches a connected NetworkX spatial graph from the roads GeoDataFrame.
+        Uses tolerance-based node snapping and bridging to guarantee network connectivity.
+        """
+        if roads_gdf is None or len(roads_gdf) == 0:
+            return None, None, None
+
+        if (
+            EvacuationService._cached_road_graph is not None
+            and EvacuationService._cached_roads_count == len(roads_gdf)
+        ):
+            return (
+                EvacuationService._cached_road_graph,
+                EvacuationService._cached_road_nodes,
+                EvacuationService._cached_road_tree,
+            )
+
+        try:
+            G_raw = nx.Graph()
+            for _, row in roads_gdf.iterrows():
+                geom = row.geometry
+                if geom is None or geom.is_empty:
+                    continue
+                lines = []
+                if geom.geom_type == "LineString":
+                    lines = [geom]
+                elif geom.geom_type == "MultiLineString":
+                    lines = list(geom.geoms)
+
+                for line in lines:
+                    coords = list(line.coords)
+                    for i in range(len(coords) - 1):
+                        u = (round(coords[i][0], 6), round(coords[i][1], 6))
+                        v = (round(coords[i + 1][0], 6), round(coords[i + 1][1], 6))
+                        d_lon = (v[0] - u[0]) * 111320 * math.cos(math.radians((u[1] + v[1]) / 2))
+                        d_lat = (v[1] - u[1]) * 110540
+                        dist = math.hypot(d_lon, d_lat)
+                        if dist > 0:
+                            G_raw.add_edge(u, v, weight=dist)
+
+            raw_nodes = list(G_raw.nodes())
+            if not raw_nodes:
+                return None, None, None
+
+            raw_coords = np.array(raw_nodes)
+            tree_raw = cKDTree(raw_coords)
+
+            # Cluster nodes within 25 meters (0.00025 deg)
+            node_map = {}
+            for i, pt in enumerate(raw_coords):
+                if i in node_map:
+                    continue
+                neighbors = tree_raw.query_ball_point(pt, 0.00025)
+                for n_idx in neighbors:
+                    if n_idx not in node_map:
+                        node_map[n_idx] = tuple(pt)
+
+            G_snapped = nx.Graph()
+            for u, v, data in G_raw.edges(data=True):
+                u_idx = tree_raw.query(u)[1]
+                v_idx = tree_raw.query(v)[1]
+                u_rep = node_map[u_idx]
+                v_rep = node_map[v_idx]
+                if u_rep != v_rep:
+                    G_snapped.add_edge(u_rep, v_rep, weight=data["weight"])
+
+            snapped_nodes = list(G_snapped.nodes())
+            if not snapped_nodes:
+                return None, None, None
+
+            snapped_pts = np.array(snapped_nodes)
+            tree_snapped = cKDTree(snapped_pts)
+
+            # Bridge close road endpoints (<60m)
+            pairs = tree_snapped.query_pairs(0.00055)
+            for i, j in pairs:
+                u = snapped_nodes[i]
+                v = snapped_nodes[j]
+                if not nx.has_path(G_snapped, u, v):
+                    d_lon = (v[0] - u[0]) * 111320 * math.cos(math.radians((u[1] + v[1]) / 2))
+                    d_lat = (v[1] - u[1]) * 110540
+                    dist = math.hypot(d_lon, d_lat)
+                    G_snapped.add_edge(u, v, weight=dist)
+
+            # Connect any remaining disconnected components to the main network
+            comps = list(nx.connected_components(G_snapped))
+            if len(comps) > 1:
+                main_comp = max(comps, key=len)
+                main_nodes = np.array(list(main_comp))
+                tree_main = cKDTree(main_nodes)
+                for comp in comps:
+                    if comp == main_comp:
+                        continue
+                    c_nodes = np.array(list(comp))
+                    dists, indices = tree_main.query(c_nodes)
+                    best_i = int(np.argmin(dists))
+                    u = tuple(c_nodes[best_i])
+                    v = tuple(main_nodes[indices[best_i]])
+                    d_lon = (v[0] - u[0]) * 111320 * math.cos(math.radians((u[1] + v[1]) / 2))
+                    d_lat = (v[1] - u[1]) * 110540
+                    dist = math.hypot(d_lon, d_lat)
+                    G_snapped.add_edge(u, v, weight=dist)
+
+            final_nodes = list(G_snapped.nodes())
+            final_tree = cKDTree(np.array(final_nodes))
+
+            EvacuationService._cached_road_graph = G_snapped
+            EvacuationService._cached_road_nodes = final_nodes
+            EvacuationService._cached_road_tree = final_tree
+            EvacuationService._cached_roads_count = len(roads_gdf)
+
+            return G_snapped, final_nodes, final_tree
+        except Exception as exc:
+            logger.error("Failed to build road graph: %s", exc)
+            return None, None, None
+

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Satellite, Upload } from 'lucide-react';
+import { Satellite, Upload, BookOpen } from 'lucide-react';
 
 const STATUS_LABELS = {
   idle: 'Ready',
@@ -16,7 +16,7 @@ const TAB_TITLES = {
   ai: 'AI Contextual Assistant',
 };
 
-export default function Header({ status = 'idle', activeTab = 'map', onNavigate, onGoHome, hasData }) {
+export default function Header({ status = 'idle', activeTab = 'map', onNavigate, onGoHome, onOpenGuide, hasData }) {
   return (
     <header className="header">
       <div className="header-left">
@@ -38,6 +38,17 @@ export default function Header({ status = 'idle', activeTab = 'map', onNavigate,
       </div>
 
       <div className="header-right">
+        {onOpenGuide && (
+          <button
+            className="header-cta-guide"
+            onClick={onOpenGuide}
+            title="Open SatQuery User Guide"
+          >
+            <BookOpen size={14} style={{ marginRight: 6 }} />
+            User Guide
+          </button>
+        )}
+
         {onNavigate && (
           <button
             className="header-cta-upload"

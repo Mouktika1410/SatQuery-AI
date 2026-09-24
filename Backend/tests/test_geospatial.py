@@ -208,6 +208,69 @@ def test_evacuation_filter_excludes_flooded_pois():
     assert "Flooded School" not in names, "Inside POI should be excluded"
 
 
+def test_evacuation_routing_follows_roads():
+    """Candidates should have real road routes calculated when road layers are available."""
+    from app.services.evacuation import EvacuationService
+    from shapely.geometry import LineString
+
+    flood_geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[76.45, 9.65], [76.47, 9.65], [76.47, 9.67], [76.45, 9.67], [76.45, 9.65]]
+                    ],
+                },
+                "properties": {},
+            }
+        ],
+    }
+
+    # Road passing near flood boundary to a safe site
+    roads_gdf = gpd.GeoDataFrame(
+        [
+            {
+                "name": "Main Evacuation Road",
+                "geometry": LineString([[76.471, 9.66], [76.48, 9.66], [76.49, 9.66], [76.50, 9.66]]),
+            }
+        ],
+        crs="EPSG:4326",
+    )
+
+    pois_gdf = gpd.GeoDataFrame(
+        [
+            {"name": "Safe Evac Center", "type": "community_hall", "geometry": Point(76.501, 9.661)}
+        ],
+        crs="EPSG:4326",
+    )
+
+    class MockRepoWithRoads:
+        def load_layer(self, layer_type):
+            if layer_type == "pois":
+                return pois_gdf
+            if layer_type == "roads":
+                return roads_gdf
+            return None
+
+    svc = EvacuationService()
+    result = svc.find_candidates(flood_geojson, MockRepoWithRoads(), buffer_m=50.0)
+
+    assert result["total_found"] == 1
+    cand = result["candidates"][0]
+    assert cand["name"] == "Safe Evac Center"
+    assert cand["route_geojson"] is not None
+    assert cand["route_geojson"]["type"] == "Feature"
+    assert cand["route_geojson"]["geometry"]["type"] == "LineString"
+    assert len(cand["route_geojson"]["geometry"]["coordinates"]) >= 4
+    assert cand["route_distance_km"] is not None
+    assert cand["route_distance_km"] > 0
+    assert cand["origin_name"] is not None
+
+
+
 # ---------------------------------------------------------------------------
 # Test 5 — GIS repository available_layers returns all False for empty dir
 # ---------------------------------------------------------------------------

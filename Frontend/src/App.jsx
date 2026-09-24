@@ -8,6 +8,7 @@ import StatusIndicator from './components/StatusIndicator';
 import MetricsPanel from './components/MetricsPanel';
 import MapViewer from './components/MapViewer';
 import AiAssistant from './components/AiAssistant';
+import UserGuideModal from './components/UserGuideModal';
 import { runFullPipeline } from './services/api';
 import {
   BarChart2,
@@ -28,6 +29,7 @@ import {
 export default function App() {
   const [showLanding, setShowLanding] = useState(true);
   const [showTransition, setShowTransition] = useState(false);
+  const [showGuideModal, setShowGuideModal] = useState(false);
   const [activeTab, setActiveTab] = useState('upload');
 
   const [analysisState, setAnalysisState] = useState('idle');
@@ -37,6 +39,14 @@ export default function App() {
 
   const [uploadedFiles, setUploadedFiles] = useState({ pre: null, post: null });
   const [selectedFeature, setSelectedFeature] = useState(null);
+  const [focusVillage, setFocusVillage] = useState(null);
+
+  // Handle exploring specific village in 3D Map Explorer
+  const handleExploreVillage3D = useCallback((village) => {
+    setFocusVillage(village);
+    setSelectedFeature({ type: 'village', name: village.name, data: village });
+    setActiveTab('map');
+  }, []);
 
   // Quick panel toggle on Map Explorer
   const [showMapDrawer, setShowMapDrawer] = useState(true);
@@ -87,6 +97,7 @@ export default function App() {
   const affectedVillages = pipelineResult?.impact?.affected_villages || [];
   const affectedVillagesGeoJSON = pipelineResult?.impact?.affected_villages_geojson || null;
   const affectedRoadsGeoJSON = pipelineResult?.impact?.affected_roads_geojson || null;
+  const affectedBuildingsGeoJSON = pipelineResult?.impact?.affected_buildings_geojson || null;
   const priorityScores = pipelineResult?.priority_scores || [];
 
   const hasData = Boolean(pipelineResult);
@@ -104,10 +115,19 @@ export default function App() {
 
   if (showLanding) {
     return (
-      <LandingPage
-        onGetStarted={handleGetStarted}
-        hasAnalysisData={hasData}
-      />
+      <>
+        <LandingPage
+          onGetStarted={handleGetStarted}
+          hasAnalysisData={hasData}
+          onOpenGuide={() => setShowGuideModal(true)}
+        />
+        <UserGuideModal
+          isOpen={showGuideModal}
+          onClose={() => setShowGuideModal(false)}
+          onLaunchWorkspace={handleGetStarted}
+          hasAnalysisData={hasData}
+        />
+      </>
     );
   }
 
@@ -121,6 +141,7 @@ export default function App() {
           setActiveTab(tab);
         }}
         onGoHome={handleGoHome}
+        onOpenGuide={() => setShowGuideModal(true)}
         hasData={hasData}
       />
 
@@ -149,9 +170,15 @@ export default function App() {
                 affectedVillages={affectedVillages}
                 affectedVillagesGeoJSON={affectedVillagesGeoJSON}
                 affectedRoadsGeoJSON={affectedRoadsGeoJSON}
+                affectedBuildingsGeoJSON={affectedBuildingsGeoJSON}
                 priorityScores={priorityScores}
                 selectedFeature={selectedFeature}
                 onSelectFeature={setSelectedFeature}
+                focusVillage={focusVillage}
+                onClearFocusVillage={() => setFocusVillage(null)}
+                onBackToImpact={() => {
+                  setActiveTab('impact');
+                }}
               />
 
               {/* Floating Quick Drawer on Map */}
@@ -236,6 +263,7 @@ export default function App() {
                     postFile={uploadedFiles.post}
                     selectedFeature={selectedFeature}
                     onSelectFeature={setSelectedFeature}
+                    onExploreVillage3D={handleExploreVillage3D}
                   />
                 ) : (
                   <div className="empty-state-card card">
@@ -265,6 +293,7 @@ export default function App() {
                   affectedVillages={affectedVillages}
                   affectedVillagesGeoJSON={affectedVillagesGeoJSON}
                   affectedRoadsGeoJSON={affectedRoadsGeoJSON}
+                  affectedBuildingsGeoJSON={affectedBuildingsGeoJSON}
                   priorityScores={priorityScores}
                   selectedFeature={selectedFeature}
                   onSelectFeature={setSelectedFeature}
@@ -364,6 +393,7 @@ export default function App() {
                   affectedVillages={affectedVillages}
                   affectedVillagesGeoJSON={affectedVillagesGeoJSON}
                   affectedRoadsGeoJSON={affectedRoadsGeoJSON}
+                  affectedBuildingsGeoJSON={affectedBuildingsGeoJSON}
                   priorityScores={priorityScores}
                   selectedFeature={selectedFeature}
                   onSelectFeature={setSelectedFeature}
@@ -445,6 +475,13 @@ export default function App() {
           )}
         </main>
       </div>
+
+      <UserGuideModal
+        isOpen={showGuideModal}
+        onClose={() => setShowGuideModal(false)}
+        onLaunchWorkspace={handleGetStarted}
+        hasAnalysisData={hasData}
+      />
 
       <StatusIndicator state={analysisState} error={error} />
     </div>

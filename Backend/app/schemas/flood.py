@@ -194,6 +194,7 @@ class ImpactMetrics(BaseModel):
     # GeoJSON FeatureCollections for overlay on Leaflet map
     affected_villages_geojson: Optional[Dict[str, Any]] = None
     affected_roads_geojson: Optional[Dict[str, Any]] = None
+    affected_buildings_geojson: Optional[Dict[str, Any]] = None
     # Transparently reports which datasets were actually used in calculations
     data_availability: Dict[str, bool] = Field(
         default_factory=lambda: {
@@ -251,6 +252,15 @@ class EvacuationCandidate(BaseModel):
         default=None, description="Elevation sampled from DEM raster in meters (if available)"
     )
     notes: str = "Candidate accessible site for on-ground verification only. Not a verified shelter."
+    route_geojson: Optional[Dict[str, Any]] = Field(
+        default=None, description="GeoJSON Feature with LineString geometry following the real road network"
+    )
+    route_distance_km: Optional[float] = Field(
+        default=None, description="Road network distance in km from flood boundary to this site"
+    )
+    origin_name: Optional[str] = Field(
+        default=None, description="Name or description of the route departure origin"
+    )
 
 
 class EvacuationCandidatesResult(BaseModel):

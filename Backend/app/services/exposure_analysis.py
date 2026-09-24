@@ -51,6 +51,7 @@ class ExposureAnalysisService:
             "affected_road_length_km": None,
             "affected_villages_geojson": None,
             "affected_roads_geojson": None,
+            "affected_buildings_geojson": None,
             "data_availability": {
                 "villages": False,
                 "population": False,
@@ -104,8 +105,9 @@ class ExposureAnalysisService:
         buildings_gdf = gis_repo.load_layer("buildings")
         if buildings_gdf is not None:
             result["data_availability"]["buildings"] = True
-            building_count = self._compute_affected_buildings(flood_gdf, buildings_gdf)
+            building_count, buildings_geojson = self._compute_affected_buildings(flood_gdf, buildings_gdf)
             result["affected_buildings"] = building_count
+            result["affected_buildings_geojson"] = buildings_geojson
 
         # --- Roads -----------------------------------------------------------
         roads_gdf = gis_repo.load_layer("roads")
@@ -144,17 +146,31 @@ class ExposureAnalysisService:
 
             intersected_m = intersected.to_crs(metric_crs)
 
+            try:
+                intersected_wgs84 = intersected.to_crs("EPSG:4326")
+            except Exception:
+                intersected_wgs84 = intersected
+
             results = []
             name_col = self._find_name_column(intersected)
 
-            for _, row in intersected_m.iterrows():
+            for idx, (_, row) in enumerate(intersected_m.iterrows()):
                 area_km2 = row.geometry.area / 1_000_000 if row.geometry else 0.0
                 name = str(row.get(name_col, "Unknown")) if name_col else "Unknown"
+                geom_wgs84 = None
+                try:
+                    g = intersected_wgs84.iloc[idx].geometry
+                    if g and not g.is_empty:
+                        geom_wgs84 = mapping(g)
+                except Exception:
+                    pass
+
                 results.append(
                     {
                         "name": name,
                         "area_flooded_km2": round(area_km2, 4),
                         "population_affected": None,
+                        "geometry": geom_wgs84,
                     }
                 )
 
@@ -267,8 +283,8 @@ class ExposureAnalysisService:
 
     def _compute_affected_buildings(
         self, flood_gdf: Any, buildings_gdf: Any
-    ) -> Optional[int]:
-        """Count building footprints that intersect the flood polygon."""
+    ) -> tuple[Optional[int], Optional[Dict[str, Any]]]:
+        """Count building footprints that intersect the flood polygon and export GeoJSON."""
         try:
             if buildings_gdf.crs != flood_gdf.crs:
                 buildings_gdf = buildings_gdf.to_crs(flood_gdf.crs)
@@ -276,13 +292,20 @@ class ExposureAnalysisService:
             intersected = self._overlay.overlay_flood_with_layers(
                 flood_gdf, "buildings", buildings_gdf
             )
-            if intersected is None:
-                return 0
-            return len(intersected)
+            if intersected is None or len(intersected) == 0:
+                return 0, None
+
+            try:
+                bld_wgs84 = intersected.to_crs("EPSG:4326")
+                bld_geojson = json.loads(bld_wgs84.to_json())
+            except Exception:
+                bld_geojson = None
+
+            return len(intersected), bld_geojson
 
         except Exception as exc:
             logger.error("Building count failed: %s", exc)
-            return None
+            return None, None
 
     # ------------------------------------------------------------------
     # Utility helpers

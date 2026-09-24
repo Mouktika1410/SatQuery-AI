@@ -14,7 +14,9 @@ import {
   Satellite,
   BarChart2,
   TrendingUp,
-  Sliders
+  Sliders,
+  ExternalLink,
+  Box
 } from 'lucide-react';
 
 function fmt(val, unit = '', decimals = 2) {
@@ -240,7 +242,7 @@ function ImageSideBySidePreview({ result, preFile, postFile }) {
   );
 }
 
-export default function MetricsPanel({ result, preFile, postFile, selectedFeature, onSelectFeature }) {
+export default function MetricsPanel({ result, preFile, postFile, selectedFeature, onSelectFeature, onExploreVillage3D }) {
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -409,14 +411,49 @@ export default function MetricsPanel({ result, preFile, postFile, selectedFeatur
                 <li
                   key={i}
                   className={`village-item interactive ${isSelected ? 'selected' : ''}`}
-                  onClick={() => onSelectFeature && onSelectFeature(isSelected ? null : { type: 'village', name: v.name })}
-                  title="Click to locate on GIS map"
+                  onClick={() => onSelectFeature && onSelectFeature(isSelected ? null : { type: 'village', name: v.name, data: v })}
+                  title="Click to inspect village"
+                  style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
                 >
-                  <span className="village-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <MapPin size={14} color="#f59e0b" />
-                    {v.name}
-                  </span>
-                  <span className="village-area">{v.area_flooded_km2?.toFixed(2)} km² flooded</span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                    <span className="village-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <MapPin size={14} color="#f59e0b" />
+                      {v.name}
+                    </span>
+                    <span className="village-area">{v.area_flooded_km2?.toFixed(2)} km² flooded</span>
+                  </div>
+
+                  {isSelected && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 6, borderTop: '1px solid rgba(255, 255, 255, 0.08)', width: '100%' }}>
+                      <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                        Local flood sector
+                      </span>
+                      <button
+                        className="btn-primary-sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onExploreVillage3D && onExploreVillage3D(v);
+                        }}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          fontSize: '0.72rem',
+                          background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '4px',
+                          padding: '3px 9px',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <Box size={12} />
+                        <span>Explore This Area in 3D</span>
+                        <ExternalLink size={11} />
+                      </button>
+                    </div>
+                  )}
                 </li>
               );
             })}
@@ -476,26 +513,66 @@ export default function MetricsPanel({ result, preFile, postFile, selectedFeatur
                 {priority_scores.map((p) => {
                   const isSelected = selectedFeature?.type === 'village' && selectedFeature?.name === p.village_name;
                   return (
-                    <tr
-                      key={p.rank}
-                      className={`priority-row interactive ${isSelected ? 'selected' : ''}`}
-                      onClick={() => onSelectFeature && onSelectFeature(isSelected ? null : { type: 'village', name: p.village_name })}
-                      title="Click to highlight village on map"
-                    >
-                      <td className="rank-col">{p.rank}</td>
-                      <td className="name-col">{p.village_name}</td>
-                      <td className="score-col">
-                        <div className="score-bar-bg">
-                          <div
-                            className="score-bar-fill"
-                            style={{
-                              width: `${Math.min(100, Math.max(5, p.priority_score * 100)).toFixed(1)}%`,
-                            }}
-                          />
-                        </div>
-                        <span className="score-val">{p.priority_score.toFixed(3)}</span>
-                      </td>
-                    </tr>
+                    <React.Fragment key={p.rank}>
+                      <tr
+                        className={`priority-row interactive ${isSelected ? 'selected' : ''}`}
+                        onClick={() => {
+                          const vObj = impact?.affected_villages?.find(v => v.name?.toLowerCase() === p.village_name?.toLowerCase());
+                          onSelectFeature && onSelectFeature(isSelected ? null : { type: 'village', name: p.village_name, data: vObj });
+                        }}
+                        title="Click to highlight village on map"
+                      >
+                        <td className="rank-col">{p.rank}</td>
+                        <td className="name-col">{p.village_name}</td>
+                        <td className="score-col">
+                          <div className="score-bar-bg">
+                            <div
+                              className="score-bar-fill"
+                              style={{
+                                width: `${Math.min(100, Math.max(5, p.priority_score * 100)).toFixed(1)}%`,
+                              }}
+                            />
+                          </div>
+                          <span className="score-val">{p.priority_score.toFixed(3)}</span>
+                        </td>
+                      </tr>
+                      {isSelected && (
+                        <tr className="priority-detail-row">
+                          <td colSpan={3} style={{ background: 'rgba(2, 132, 199, 0.08)', padding: '6px 12px', borderBottom: '1px solid #334155' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                                Rank #{p.rank} Prioritized Disaster Zone
+                              </span>
+                              <button
+                                className="btn-primary-sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const vObj = impact?.affected_villages?.find(v => v.name?.toLowerCase() === p.village_name?.toLowerCase());
+                                  if (vObj) onExploreVillage3D && onExploreVillage3D(vObj);
+                                }}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 5,
+                                  fontSize: '0.72rem',
+                                  background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                                  color: '#fff',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  padding: '3px 9px',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <Box size={12} />
+                                <span>Explore This Area in 3D</span>
+                                <ExternalLink size={11} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>

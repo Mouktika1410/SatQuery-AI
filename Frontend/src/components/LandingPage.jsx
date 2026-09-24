@@ -19,10 +19,11 @@ import {
   Volume2,
   VolumeX,
   Maximize2,
-  Minimize2
+  Minimize2,
+  BookOpen,
 } from 'lucide-react';
 
-export default function LandingPage({ onGetStarted, hasAnalysisData }) {
+export default function LandingPage({ onGetStarted, hasAnalysisData, onOpenGuide }) {
   const [showDemoModal, setShowDemoModal] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -185,9 +186,9 @@ export default function LandingPage({ onGetStarted, hasAnalysisData }) {
             <span>Interactive Walkthrough</span>
           </button>
 
-          <button className="btn-header-platform" onClick={() => onGetStarted(hasAnalysisData ? 'map' : 'upload')}>
-            <span>{hasAnalysisData ? 'Open Platform' : 'Launch Workspace'}</span>
-            <ChevronRight size={15} style={{ marginLeft: 4 }} />
+          <button className="btn-header-guide" onClick={onOpenGuide} title="Open SatQuery User Guide">
+            <BookOpen size={14} color="#38bdf8" style={{ marginRight: 6 }} />
+            <span>User Guide</span>
           </button>
         </div>
       </header>

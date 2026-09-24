@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Focus, Maximize2, Minimize2, X, Satellite } from 'lucide-react';
+import { Focus, Maximize2, Minimize2, X, Satellite, Box, Layers } from 'lucide-react';
+import Map3DViewer from './Map3DViewer';
 
 export default function MapViewer({
   floodGeoJSON,
@@ -10,10 +11,14 @@ export default function MapViewer({
   affectedVillages,
   affectedVillagesGeoJSON,
   affectedRoadsGeoJSON,
+  affectedBuildingsGeoJSON,
   priorityScores,
   selectedFeature,
   onSelectFeature,
   skipAnimation = false,
+  focusVillage = null,
+  onClearFocusVillage,
+  onBackToImpact,
 }) {
   const mapContainerRef = useRef(null);
   const mapInstanceRef = useRef(null);
@@ -21,6 +26,7 @@ export default function MapViewer({
   const villagesLayerRef = useRef(null);
   const roadsLayerRef = useRef(null);
   const evacuLayerRef = useRef(null);
+  const evacRouteLayerRef = useRef(null);
   const layerControlRef = useRef(null);
   const baseLayersRef = useRef({});
   const overlayLayersRef = useRef({});
@@ -36,6 +42,35 @@ export default function MapViewer({
 
   // Track fullscreen state safely
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // View mode state: '3d' is the DEFAULT when Map Explorer opens
+  const [viewMode, setViewMode] = useState('3d');
+
+  // Automatically ensure 3D mode is active when focusing on a village from Impact Analysis
+  useEffect(() => {
+    if (focusVillage) {
+      setViewMode('3d');
+    }
+  }, [focusVillage]);
+
+  // Switch to 2D Leaflet map safely preserving map instance & state
+  const handleSwitchTo2D = useCallback(() => {
+    setViewMode('2d');
+    setTimeout(() => {
+      try {
+        mapInstanceRef.current?.invalidateSize();
+      } catch (_) {}
+    }, 60);
+  }, []);
+
+  const handleSwitchTo3D = useCallback(() => {
+    setViewMode('3d');
+    setTimeout(() => {
+      try {
+        window.__map3d?.resize();
+      } catch (_) {}
+    }, 60);
+  }, []);
 
   // Initialize Leaflet map once - begins with the wide India-level view from the sample-data workflow
   useEffect(() => {
@@ -102,7 +137,14 @@ export default function MapViewer({
       if (e.name.includes('Candidate') || e.name.includes('Evacuation')) setActiveLayers((prev) => ({ ...prev, evac: false }));
     });
 
+    map.on('click', (e) => {
+      if (e.originalEvent && !e.originalEvent._handled) {
+        onSelectFeature?.(null);
+      }
+    });
+
     mapInstanceRef.current = map;
+    window.__map2d = map;
 
     return () => {
       map.remove();
@@ -168,6 +210,8 @@ export default function MapViewer({
     const map = mapInstanceRef.current;
     if (!map) return;
 
+    window.__floodGeoJSON = floodGeoJSON;
+    window.__affectedVillagesGeoJSON = affectedVillagesGeoJSON;
     let combinedBounds = null;
 
     // -------------------------------------------------------------------------
@@ -488,6 +532,16 @@ export default function MapViewer({
                 '<span class="gis-popup-label">Distance to Flood:</span>' +
                 `<span class="gis-popup-val highlight-green">${distStr}</span>` +
               '</div>' +
+              (c.route_distance_km != null
+                ? '<div class="gis-popup-row">' +
+                    '<span class="gis-popup-label">Road Route Distance:</span>' +
+                    `<span class="gis-popup-val highlight-amber" style="font-weight: 700; color: #00e5ff;">${c.route_distance_km.toFixed(2)} km</span>` +
+                  '</div>' +
+                  '<div class="gis-popup-row">' +
+                    '<span class="gis-popup-label">Route Departure:</span>' +
+                    `<span class="gis-popup-val" style="font-size: 11px;">${c.origin_name || 'Flood Boundary'}</span>` +
+                  '</div>'
+                : '') +
               (elevStr
                 ? '<div class="gis-popup-row">' +
                     '<span class="gis-popup-label">Elevation:</span>' +
@@ -516,6 +570,51 @@ export default function MapViewer({
       evacuLayerRef.current = group;
       layerControlRef.current?.addOverlay(group, 'Evacuation Sites');
     }
+
+    // -------------------------------------------------------------------------
+    // 4b. EVACUATION ROAD ROUTE TO SELECTED CENTER (2D LEAFLET)
+    // -------------------------------------------------------------------------
+    if (evacRouteLayerRef.current) {
+      try {
+        map.removeLayer(evacRouteLayerRef.current);
+      } catch (_) {}
+      evacRouteLayerRef.current = null;
+    }
+
+    const isEvacSelected = (selectedFeature?.type === 'evac' || selectedFeature?.type === 'evacuation');
+    const selName = selectedFeature?.name?.toLowerCase().trim();
+    const cand = isEvacSelected
+      ? (evacuationCandidates?.find((c) => c.name?.toLowerCase().trim() === selName) || selectedFeature?.data)
+      : null;
+
+    if (cand?.route_geojson) {
+      const routeGroup = L.featureGroup();
+      // High-contrast casing halo
+      const casing = L.geoJSON(cand.route_geojson, {
+        style: {
+          color: '#0f172a',
+          weight: 7.5,
+          opacity: 0.85,
+          lineCap: 'round',
+          lineJoin: 'round',
+        },
+      });
+      // Vivid electric cyan route
+      const line = L.geoJSON(cand.route_geojson, {
+        style: {
+          color: '#00e5ff',
+          weight: 4.5,
+          opacity: 0.98,
+          lineCap: 'round',
+          lineJoin: 'round',
+        },
+      });
+      routeGroup.addLayer(casing);
+      routeGroup.addLayer(line);
+      routeGroup.addTo(map);
+      evacRouteLayerRef.current = routeGroup;
+    }
+    window.__activeEvacRoute2D = cand?.route_geojson || null;
 
     // -------------------------------------------------------------------------
     // 5. FIT / FLY BOUNDS SMOOTHLY TO DETECTED EXTENT
@@ -573,12 +672,65 @@ export default function MapViewer({
         </div>
       )}
 
-      {/* Main Leaflet Map Container */}
-      <div ref={mapContainerRef} className="leaflet-map-container" />
+      {/* Main Leaflet Map Container - ALWAYS maintained in DOM to preserve state */}
+      <div
+        ref={mapContainerRef}
+        className="leaflet-map-container"
+        style={{ display: viewMode === '2d' ? 'block' : 'none' }}
+      />
 
-      {/* Floating Map Toolbar Controls */}
-      <div className="map-action-toolbar">
+      {/* 3D Map Explorer Container */}
+      <div
+        style={{
+          display: viewMode === '3d' ? 'block' : 'none',
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+        }}
+      >
         {hasData && (
+          <Map3DViewer
+            floodGeoJSON={floodGeoJSON}
+            floodMetrics={floodMetrics}
+            affectedVillages={affectedVillages}
+            affectedVillagesGeoJSON={affectedVillagesGeoJSON}
+            affectedRoadsGeoJSON={affectedRoadsGeoJSON}
+            affectedBuildingsGeoJSON={affectedBuildingsGeoJSON}
+            evacuationCandidates={evacuationCandidates}
+            focusVillage={focusVillage}
+            onClearFocusVillage={onClearFocusVillage}
+            onBackToImpact={onBackToImpact}
+            priorityScores={priorityScores}
+            selectedFeature={selectedFeature}
+            onSelectFeature={onSelectFeature}
+          />
+        )}
+      </div>
+
+      {/* Floating Map Toolbar Controls (Persistent across 2D & 3D) */}
+      <div className="map-action-toolbar" style={{ zIndex: 30 }}>
+        {hasData && (
+          <div className="map-view-mode-toggle">
+            <button
+              className={`view-mode-pill ${viewMode === '3d' ? 'active' : ''}`}
+              onClick={handleSwitchTo3D}
+              title="3D Map Explorer"
+            >
+              <Box size={13} />
+              <span>3D</span>
+            </button>
+            <button
+              className={`view-mode-pill ${viewMode === '2d' ? 'active' : ''}`}
+              onClick={handleSwitchTo2D}
+              title="2D Leaflet Map"
+            >
+              <Layers size={13} />
+              <span>2D</span>
+            </button>
+          </div>
+        )}
+        {viewMode === '2d' && hasData && (
           <button
             className="map-tool-btn"
             onClick={handleResetBounds}

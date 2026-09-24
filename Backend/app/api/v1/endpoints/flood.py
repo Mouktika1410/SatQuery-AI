@@ -16,7 +16,7 @@ import tempfile
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 
 from app.core.config import settings
 from app.schemas.flood import (
@@ -524,6 +524,7 @@ async def run_full_pipeline(
                 affected_road_length_km=exposure.get("affected_road_length_km"),
                 affected_villages_geojson=exposure.get("affected_villages_geojson"),
                 affected_roads_geojson=exposure.get("affected_roads_geojson"),
+                affected_buildings_geojson=exposure.get("affected_buildings_geojson"),
                 data_availability=exposure.get("data_availability", {}),
                 disclaimer=exposure.get("disclaimer", ""),
             )
@@ -575,7 +576,28 @@ async def run_full_pipeline(
 
 
 # ---------------------------------------------------------------------------
-# 7. Session Management
+# 7. Spatial Layers Access
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/buildings",
+    summary="Retrieve building footprints GeoJSON",
+)
+async def get_buildings():
+    """Return building footprints GeoJSON from data/buildings/."""
+    from app.services.gis_repository import GISRepository
+    import json
+    gis_repo = GISRepository(settings.DATA_DIR)
+    bld_gdf = gis_repo.load_layer("buildings")
+    if bld_gdf is not None:
+        if bld_gdf.crs != "EPSG:4326":
+            bld_gdf = bld_gdf.to_crs("EPSG:4326")
+        return json.loads(bld_gdf.to_json())
+    return {"type": "FeatureCollection", "features": []}
+
+
+# ---------------------------------------------------------------------------
+# 8. Session Management
 # ---------------------------------------------------------------------------
 
 @router.get(
@@ -601,3 +623,28 @@ async def delete_session(session_id: str):
         del _session_cache[session_id]
         return {"deleted": True, "session_id": session_id}
     raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+
+
+# ---------------------------------------------------------------------------
+# 9. Sample Test Images
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/sample/{sample_name}",
+    summary="Download sample satellite GeoTIFF files",
+)
+async def get_sample_image(sample_name: str):
+    """Serve real Kerala pre/post flood sample images."""
+    allowed = {
+        "pre": "kerala_before_flood.tif",
+        "post": "kerala_after_flood.tif",
+        "kerala_before_flood.tif": "kerala_before_flood.tif",
+        "kerala_after_flood.tif": "kerala_after_flood.tif",
+    }
+    if sample_name not in allowed:
+        raise HTTPException(status_code=404, detail="Sample image not found")
+    filename = allowed[sample_name]
+    path = os.path.join(settings.DATA_DIR, "test_images", filename)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail=f"Sample file '{filename}' missing on disk")
+    return FileResponse(path, media_type="image/tiff", filename=filename)

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Database, UploadCloud, CheckCircle2, ChevronDown, ChevronUp, RefreshCw, Play, Sliders } from 'lucide-react';
+import { Database, UploadCloud, CheckCircle2, ChevronDown, ChevronUp, RefreshCw, Play, Sliders, Sparkles, X } from 'lucide-react';
 
 const METHODS = [
   { value: 'auto', label: 'Auto (Recommended - Multi-Band NDWI / Otsu)' },
@@ -33,12 +33,35 @@ function EventSatThumb() {
 
 function FileDropZone({ label, file, onChange, id, isEvent }) {
   const inputRef = useRef(null);
+  const [loadingSample, setLoadingSample] = useState(false);
+  const sampleFileName = isEvent ? 'kerala_after_flood.tif' : 'kerala_before_flood.tif';
 
   const handleClick = () => inputRef.current?.click();
   const handleDrop = (e) => {
     e.preventDefault();
     const dropped = e.dataTransfer.files[0];
     if (dropped) onChange(dropped);
+  };
+
+  const handleUseSample = async (e) => {
+    e.stopPropagation();
+    setLoadingSample(true);
+    try {
+      let res = await fetch(`/samples/${sampleFileName}`);
+      if (!res.ok) {
+        res = await fetch(`/api/v1/flood/sample/${sampleFileName}`);
+      }
+      if (!res.ok) {
+        throw new Error(`Failed to load ${sampleFileName}`);
+      }
+      const blob = await res.blob();
+      const sampleFile = new File([blob], sampleFileName, { type: 'image/tiff' });
+      onChange(sampleFile);
+    } catch (err) {
+      console.error(`Failed to load sample image ${sampleFileName}:`, err);
+    } finally {
+      setLoadingSample(false);
+    }
   };
 
   const formatSize = (bytes) => {
@@ -82,14 +105,43 @@ function FileDropZone({ label, file, onChange, id, isEvent }) {
               <CheckCircle2 size={24} color="#10b981" />
               <div className="file-upload-name font-mono">{file.name}</div>
               <div className="file-upload-size font-mono">{formatSize(file.size)}</div>
+              <div className="file-selected-actions" onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  className="btn-change-file font-mono"
+                  onClick={() => onChange(null)}
+                  title="Remove and select another file"
+                >
+                  Change File
+                </button>
+              </div>
             </div>
           ) : (
-            <div className="file-prompt-info">
-              <UploadCloud size={24} color="#38bdf8" className="upload-cloud-icon" />
-              <div className="file-upload-label font-sans">Click or drag GeoTIFF here</div>
-              <div className="file-upload-subtext font-mono">
-                .tif / .tiff - Georeferenced required
+            <div className="file-prompt-container">
+              <div className="file-prompt-info">
+                <UploadCloud size={24} color="#38bdf8" className="upload-cloud-icon" />
+                <div className="file-upload-label font-sans">Click or drag GeoTIFF here</div>
+                <div className="file-upload-subtext font-mono">
+                  .tif / .tiff - Georeferenced required
+                </div>
               </div>
+
+              <div className="sample-data-divider-row font-mono">
+                <span className="sample-divider-line" />
+                <span className="sample-divider-text">or use Sample Data</span>
+                <span className="sample-divider-line" />
+              </div>
+
+              <button
+                type="button"
+                className="btn-use-sample-inside font-sans"
+                onClick={handleUseSample}
+                disabled={loadingSample}
+                title={`Load ${sampleFileName}`}
+              >
+                <Sparkles size={13} color="#f59e0b" style={{ marginRight: 6 }} />
+                <span>{loadingSample ? 'Loading Sample…' : 'Use Kerala Sample'}</span>
+              </button>
             </div>
           )}
         </div>
@@ -105,6 +157,7 @@ export default function UploadSection({ onRunAnalysis, isRunning }) {
   const [method, setMethod] = useState('auto');
   const [morphIters, setMorphIters] = useState(2);
   const [simplifyTol, setSimplifyTol] = useState('0.0001');
+  const [loadingBoth, setLoadingBoth] = useState(false);
 
   const canRun = preFile && postFile && !isRunning;
 
@@ -118,6 +171,30 @@ export default function UploadSection({ onRunAnalysis, isRunning }) {
     });
   };
 
+  const handleLoadBothSamples = async () => {
+    setLoadingBoth(true);
+    try {
+      const fetchFile = async (name) => {
+        let r = await fetch(`/samples/${name}`);
+        if (!r.ok) r = await fetch(`/api/v1/flood/sample/${name}`);
+        const blob = await r.blob();
+        return new File([blob], name, { type: 'image/tiff' });
+      };
+
+      const [fPre, fPost] = await Promise.all([
+        fetchFile('kerala_before_flood.tif'),
+        fetchFile('kerala_after_flood.tif'),
+      ]);
+
+      setPreFile(fPre);
+      setPostFile(fPost);
+    } catch (err) {
+      console.error('Failed to load sample dataset:', err);
+    } finally {
+      setLoadingBoth(false);
+    }
+  };
+
   return (
     <div className="ingestion-section-wrapper">
       {/* Section Header */}
@@ -127,9 +204,22 @@ export default function UploadSection({ onRunAnalysis, isRunning }) {
             <Database size={20} color="#38bdf8" />
           </div>
           <div>
-            <h3 className="ingestion-card-title font-sans">IMAGE INGESTION & ANALYSIS</h3>
-            <p className="ingestion-card-subtitle font-mono">Upload pre- and post-flood satellite imagery to run the analysis</p>
+            <h3 className="ingestion-card-title font-sans">IMAGE INGESTION &amp; ANALYSIS</h3>
+            <p className="ingestion-card-subtitle font-mono">Upload pre- and post-flood satellite imagery or load verified Kerala sample data</p>
           </div>
+        </div>
+
+        <div className="ingestion-quick-actions">
+          <button
+            type="button"
+            className="btn-quick-sample-load font-sans"
+            onClick={handleLoadBothSamples}
+            disabled={loadingBoth || isRunning}
+            title="Load both pre-flood and post-flood Kerala Sentinel test images"
+          >
+            <Sparkles size={14} color="#f59e0b" style={{ marginRight: 6 }} />
+            <span>{loadingBoth ? 'Loading Samples…' : 'Load Both Kerala Samples'}</span>
+          </button>
         </div>
       </div>
 
@@ -223,12 +313,10 @@ export default function UploadSection({ onRunAnalysis, isRunning }) {
 
         {(!preFile || !postFile) && (
           <div className="ingestion-disabled-hint font-mono">
-            Upload both images to enable analysis.
+            Upload both images or click "Use Kerala Sample" to enable analysis.
           </div>
         )}
       </div>
     </div>
   );
 }
-
-

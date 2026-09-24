@@ -91,12 +91,14 @@ print(f"Priority scores count: {len(priority)}")
 for p in priority:
     print(f" - Rank #{p.get('rank')}: {p.get('village_name')} (score={p.get('priority_score')})")
 
-print("\n--- EVACUATION CANDIDATES ---")
+print("\n--- EVACUATION CANDIDATES & ROUTES ---")
 evac = res.get("evacuation", {})
 candidates = evac.get("candidates", [])
 print(f"Evacuation candidates found: {len(candidates)}")
 for c in candidates:
-    print(f" - {c.get('name')} ({c.get('type')}): dist={c.get('distance_to_flood_km')} km, elev={c.get('elevation_m')} m, lat={c.get('lat')}, lon={c.get('lon')}")
+    has_route = c.get("route_geojson") is not None
+    pts = len(c["route_geojson"]["geometry"]["coordinates"]) if has_route else 0
+    print(f" - {c.get('name')} ({c.get('type')}): dist={c.get('distance_to_flood_km')} km, route_km={c.get('route_distance_km')}, origin={c.get('origin_name')}, route_pts={pts}")
 
 # Check bounding box of all layers together
 all_lats = []
